@@ -162,11 +162,20 @@ jobs:
       # so the sample count stays a reviewed number in a config file rather than
       # a literal in a workflow. --min-interval-ms paces both stages under the
       # provider's per-minute quota (60000 / RPM).
+      #
+      # The two model ids come from repository variables, so this file still
+      # names no model: set them to whatever the committed baseline was recorded
+      # on (`baseline.json`'s `target_model_id` and `judge_model_id`). Stage 03
+      # refuses to compare a run whose ids differ from the baseline's, so leaving
+      # them unset does not quietly measure the wrong thing — it exits 3 with a
+      # message naming both values.
       - id: detect
         name: Run the detector
         if: steps.secret.outputs.present == 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TARGET_MODEL_ID: ${{ vars.TARGET_MODEL_ID }}
+          JUDGE_MODEL_ID: ${{ vars.JUDGE_MODEL_ID }}
         run: |
           set +e
           uv run python scripts/detect.py \
@@ -241,7 +250,7 @@ jobs:
             0) echo "NO_REGRESSION." ;;
             1) echo "::error::REGRESSION — the drop survived the noise test."; exit 1 ;;
             2) echo "::warning::INCONCLUSIVE — not enough judged evidence to say." ;;
-            3) echo "::error::The detector could not run (bad baseline, run or config)."
+            3) echo "::error::Could not run: bad baseline, run or config, or a run that did not measure what the baseline did."
                exit 1 ;;
             *) echo "::error::Unexpected exit code ${CODE} from detect.py."; exit 1 ;;
           esac

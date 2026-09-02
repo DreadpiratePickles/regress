@@ -55,6 +55,7 @@ def comparison_payload(
     criteria: list[dict] | None = None,
     unmatched: list[dict] | None = None,
     judge_errors: tuple[int, int] = (0, 5),
+    identity: dict | None = None,
 ) -> dict:
     rows = criteria if criteria is not None else [
         criterion_row("refund", 0, text="States the amount.", baseline=(2, 2), candidate=(0, 2),
@@ -89,6 +90,14 @@ def comparison_payload(
         "cases": [],
         "criteria": rows,
         "unmatched": unmatched or [],
+        "identity": identity if identity is not None else {
+            "checked": True,
+            "goldens_sha256": {"baseline": "c" * 64, "candidate": "c" * 64},
+            "target_model_id": {"baseline": "target-model", "candidate": "target-model"},
+            "judge_model_id": {"baseline": "judge-model", "candidate": "judge-model"},
+            "judge_prompt_sha256": {"baseline": "b" * 64, "candidate": "b" * 64},
+            "target_prompt_sha256": {"baseline": "d" * 64, "candidate": "a" * 64},
+        },
         "baseline_source": {
             "created_at_utc": "2026-01-01T00:00:00Z",
             "run_ids": ["2026-01-01T00-00-00Z", "2026-01-01T01-00-00Z"],
@@ -325,6 +334,42 @@ def test_the_footer_carries_the_provenance_with_short_hashes() -> None:
     assert "a" * 64 not in rendered
     assert "2026-01-01T01-00-00Z" in rendered
     assert "samples 1" in rendered.lower()
+
+
+def test_the_footer_states_what_made_the_two_runs_comparable() -> None:
+    rendered = render_report(report_data())
+
+    line = next(line for line in rendered.splitlines() if line.startswith("Comparability:"))
+    assert "target model `target-model`" in line
+    assert "judge model `judge-model`" in line
+    assert "judge prompt `" + "b" * 12 + "…`" in line
+    assert "goldens `" + "c" * 12 + "…`" in line
+    assert "b" * 64 not in line
+
+
+def test_the_footer_says_when_comparability_was_not_checked() -> None:
+    identity = {
+        "checked": False,
+        "goldens_sha256": {"baseline": "c" * 64, "candidate": "c" * 64},
+        "target_model_id": {"baseline": "target-model", "candidate": "dry-run-fake"},
+        "judge_model_id": {"baseline": "judge-model", "candidate": "dry-run-fake-judge"},
+        "judge_prompt_sha256": {"baseline": "b" * 64, "candidate": "b" * 64},
+        "target_prompt_sha256": {"baseline": "d" * 64, "candidate": "a" * 64},
+    }
+    rendered = render_report(report_data(comparison=comparison_payload(identity=identity)))
+
+    line = next(line for line in rendered.splitlines() if line.startswith("Comparability:"))
+    assert "not checked" in line
+    assert "dry-run-fake" in line
+
+
+def test_the_footer_omits_comparability_when_the_comparison_predates_it() -> None:
+    payload = comparison_payload()
+    del payload["identity"]
+
+    rendered = render_report(report_data(comparison=payload))
+
+    assert "Comparability:" not in rendered
 
 
 def test_the_report_never_contains_an_absolute_path() -> None:

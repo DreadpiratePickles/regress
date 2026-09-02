@@ -140,6 +140,31 @@ def test_dry_run_comparison_matches_every_criterion(tmp_path):
     assert payload["overall"]["candidate"]["passes"] == CRITERIA_TOTAL
 
 
+def test_dry_run_says_the_identity_check_was_skipped(tmp_path, capsys):
+    """A dry run's model ids are placeholders, so comparability cannot be enforced.
+
+    The alternative would be to write the baseline's model ids into a manifest no
+    model produced, and a manifest that names a model nobody called is worse than
+    an unchecked comparison that says so.
+    """
+    baseline_path = write_baseline(tmp_path)
+
+    code = pipeline.main(detect_args(tmp_path, baseline_path, "--samples", "1"))
+    printed = capsys.readouterr().out
+
+    run_dir = sorted((tmp_path / "runs").iterdir())[0]
+    payload = json.loads((run_dir / COMPARISON_FILENAME).read_text(encoding="utf-8"))
+
+    assert code == 0
+    assert payload["identity"]["checked"] is False
+    assert payload["identity"]["target_model_id"] == {
+        "baseline": "dry-run-fake",
+        "candidate": "dry-run-fake",
+    }
+    assert "not checked" in printed
+    assert "dry run" in printed
+
+
 def test_dry_run_candidate_can_be_rebuilt_into_a_baseline(tmp_path):
     """The candidate is a `Baseline` too — that is what makes re-baselining one step."""
     baseline_path = write_baseline(tmp_path)
@@ -228,22 +253,33 @@ def test_detect_returns_the_run_directory_and_result(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def write_judged_run(tmp_path: Path, run_id: str, *, passes: int, total: int = 40) -> Path:
+def write_judged_run(
+    tmp_path: Path,
+    run_id: str,
+    *,
+    passes: int,
+    total: int = 40,
+    goldens_sha256: str = "1" * 64,
+    prompt_sha256: str = "2" * 64,
+    model_id: str = "synthetic-target",
+    judge_prompt_sha256: str = "3" * 64,
+    judge_model_id: str = "synthetic-judge",
+) -> Path:
     """A synthetic judged run directory: the three files stage 03 reads."""
     run_dir = tmp_path / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     provenance = {
-        "goldens_sha256": "1" * 64,
-        "prompt_sha256": "2" * 64,
-        "model_id": "synthetic-target",
+        "goldens_sha256": goldens_sha256,
+        "prompt_sha256": prompt_sha256,
+        "model_id": model_id,
     }
     (run_dir / "manifest.json").write_text(json.dumps(provenance), encoding="utf-8")
     (run_dir / "judge_manifest.json").write_text(
         json.dumps(
             {
-                "goldens_sha256": "1" * 64,
-                "judge_prompt_sha256": "3" * 64,
-                "judge_model_id": "synthetic-judge",
+                "goldens_sha256": goldens_sha256,
+                "judge_prompt_sha256": judge_prompt_sha256,
+                "judge_model_id": judge_model_id,
             }
         ),
         encoding="utf-8",
@@ -363,6 +399,51 @@ def test_compare_cli_exits_three_on_a_bad_baseline_file(tmp_path, capsys):
 
     assert compare_run.main(cli_args(broken, candidate)) == 3
     assert "BaselineInputError" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("model_id", "another-target", "target_model_id"),
+        ("judge_model_id", "another-judge", "judge_model_id"),
+        ("goldens_sha256", "9" * 64, "goldens_sha256"),
+        ("judge_prompt_sha256", "9" * 64, "judge_prompt_sha256"),
+    ],
+)
+def test_compare_cli_exits_three_when_the_candidate_is_not_comparable(
+    tmp_path, capsys, field, value, expected
+):
+    """Not exit 1: a run of a different thing is a tooling error, not a regression."""
+    baseline_run = write_judged_run(tmp_path, "baseline", passes=40)
+    candidate = write_judged_run(tmp_path, "candidate", passes=20, **{field: value})
+    baseline_path = baseline_from(tmp_path, [baseline_run])
+
+    code = compare_run.main(cli_args(baseline_path, candidate))
+    errors = capsys.readouterr().err
+
+    assert code == 3
+    assert "ComparabilityError" in errors
+    assert expected in errors
+    assert value in errors
+    assert not (candidate / COMPARISON_FILENAME).exists()
+
+
+def test_compare_cli_compares_a_run_whose_target_prompt_changed(tmp_path, capsys):
+    """The changed target prompt is the whole point; only its sha is recorded."""
+    baseline_run = write_judged_run(tmp_path, "baseline", passes=40, prompt_sha256="a" * 64)
+    candidate = write_judged_run(tmp_path, "candidate", passes=40, prompt_sha256="b" * 64)
+    baseline_path = baseline_from(tmp_path, [baseline_run])
+
+    code = compare_run.main(cli_args(baseline_path, candidate))
+    written = json.loads((candidate / COMPARISON_FILENAME).read_text(encoding="utf-8"))
+
+    assert code == 0
+    assert written["identity"]["checked"] is True
+    assert written["identity"]["target_prompt_sha256"] == {
+        "baseline": "a" * 64,
+        "candidate": "b" * 64,
+    }
+    assert written["identity"]["target_model_id"]["candidate"] == "synthetic-target"
 
 
 def test_compare_cli_exits_three_on_a_bad_config(tmp_path, capsys):

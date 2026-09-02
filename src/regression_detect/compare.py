@@ -1,7 +1,7 @@
 """Stage 03, part two: decide whether a drop is a regression or run-to-run noise.
 
 This module is pure. It opens no file, reads no clock, calls no model, and holds
-no configuration of its own: two `Baseline` objects and four thresholds go in, a
+no configuration of its own: two `Baseline` objects and the thresholds go in, a
 `ComparisonResult` comes out. That is what makes the verdict reproducible — the
 same two baselines always yield the same verdict and the same sentence.
 
@@ -16,6 +16,10 @@ this bad, given the margins. `wilson_interval` says how wide the uncertainty
 around each rate really is. `min_effect` then asks the separate question a
 p-value cannot answer: is the drop big enough to care about.
 
+None of that means anything unless the two rows measured the same thing, so
+`check_comparable` runs first and refuses the comparison outright when they did
+not — a different model or dataset is a mistake in the setup, not a regression.
+
 The record types and the English rendering live in `comparison.py`; the reasons
 behind each choice are written up in `docs/statistics.md`.
 """
@@ -23,12 +27,14 @@ behind each choice are written up in `docs/statistics.md`.
 import math
 from dataclasses import replace
 
-from .baseline import Baseline
+from .baseline import Baseline, BaselineInputError
 from .comparison import (
+    CHECKED_IDENTITY_FIELDS,
     COMPARISON_FILENAME,
     EXIT_CODES,
     INPUT_ERROR_EXIT_CODE,
     CaseComparison,
+    ComparedIdentity,
     ComparisonResult,
     CriterionComparison,
     UnmatchedCriterion,
@@ -48,6 +54,7 @@ HARD_REGRESSION_MIN_N = 2
 always fails" means anything. At n = 1 it is one coin landing the other way up."""
 
 __all__ = [
+    "CHECKED_IDENTITY_FIELDS",
     "COMPARISON_FILENAME",
     "DEFAULT_ALPHA",
     "DEFAULT_MAX_JUDGE_ERROR_RATE",
@@ -58,16 +65,37 @@ __all__ = [
     "INPUT_ERROR_EXIT_CODE",
     "WILSON_Z",
     "CaseComparison",
+    "ComparabilityError",
+    "ComparedIdentity",
     "ComparisonResult",
     "CriterionComparison",
     "UnmatchedCriterion",
     "Verdict",
+    "check_comparable",
     "compare",
     "fisher_exact_one_sided",
     "wilson_interval",
 ]
 """The stage's public surface. The record types are re-exported from
 `comparison` so a caller only has to know about the comparison, not its parts."""
+
+
+class ComparabilityError(BaselineInputError):
+    """The candidate did not measure what the baseline measured.
+
+    A subclass of the stage's input error, so it exits 3 like every other "the
+    tool could not run" condition. It is emphatically not a verdict: a run of a
+    different model against an old baseline is a mistake in the setup, and
+    reporting it as a regression would blame a diff for somebody's environment.
+    """
+
+
+IDENTITY_REMEDY = (
+    "Pin TARGET_MODEL_ID and JUDGE_MODEL_ID to the values the baseline was recorded "
+    "with, or build a new baseline for what you are measuring now "
+    "(scripts/baseline.py build). Comparing across them measures the change of "
+    "model or dataset, not the change under test."
+)
 
 
 def _check_counts(**counts: int) -> None:
@@ -166,6 +194,42 @@ def _validate_thresholds(
         raise ValueError(f"max_judge_error_rate must lie in [0, 1], got {max_judge_error_rate}")
 
 
+def check_comparable(baseline: Baseline, candidate: Baseline) -> None:
+    """Refuse two runs that did not measure the same thing.
+
+    `build_baseline` already enforces this across the runs pooled *into* a
+    baseline. The same rule has to hold across the two sides of a comparison,
+    and for the same reason: a pass rate measured on one model, judge or dataset
+    says nothing about a pass rate measured on another, and the arithmetic will
+    happily produce a confident verdict from the mixture.
+
+    The target prompt is not checked. A changed target prompt is the ordinary
+    reason to run the detector at all.
+
+    Raises:
+        ComparabilityError: naming the first field that differs and both values.
+    """
+    for field in CHECKED_IDENTITY_FIELDS:
+        mine, theirs = getattr(baseline, field), getattr(candidate, field)
+        if mine != theirs:
+            raise ComparabilityError(
+                f"Candidate and baseline disagree on '{field}': the baseline was "
+                f"recorded with {mine!r} but this run has {theirs!r}. {IDENTITY_REMEDY}"
+            )
+
+
+def _identity(baseline: Baseline, candidate: Baseline, *, checked: bool) -> ComparedIdentity:
+    """Record what each side measured, checked or not."""
+    return ComparedIdentity(
+        goldens_sha256=(baseline.goldens_sha256, candidate.goldens_sha256),
+        target_model_id=(baseline.target_model_id, candidate.target_model_id),
+        judge_model_id=(baseline.judge_model_id, candidate.judge_model_id),
+        judge_prompt_sha256=(baseline.judge_prompt_sha256, candidate.judge_prompt_sha256),
+        target_prompt_sha256=(baseline.prompt_sha256, candidate.prompt_sha256),
+        checked=checked,
+    )
+
+
 def _match(
     baseline: Baseline, candidate: Baseline
 ) -> tuple[list[CriterionComparison], list[UnmatchedCriterion]]:
@@ -260,8 +324,14 @@ def compare(
     min_effect: float = DEFAULT_MIN_EFFECT,
     min_samples: int = DEFAULT_MIN_SAMPLES,
     max_judge_error_rate: float = DEFAULT_MAX_JUDGE_ERROR_RATE,
+    check_identity: bool = True,
 ) -> ComparisonResult:
     """Compare a candidate baseline against a reference baseline.
+
+    Before any statistic is computed the two sides must agree on what they
+    measured — goldens, target model, judge model and judge prompt — because
+    arithmetic on incomparable counts produces a confident answer to a question
+    nobody asked. Whether that was enforced is recorded either way.
 
     Only criteria present on both sides are compared, and the pooled rates are
     pooled over exactly those. A criterion the goldens gained or lost cannot be a
@@ -281,8 +351,12 @@ def compare(
         min_samples: Fewest matched candidate criteria for a decisive verdict.
         max_judge_error_rate: Largest share of failed candidate judge calls
             before the run is treated as unreadable.
+        check_identity: Whether the two sides must agree on what they measured.
+            Only a dry run sets this false — its providers are canned, so its
+            model ids are placeholders rather than a claim about anything.
 
     Raises:
+        ComparabilityError: if the two sides measured different things.
         ValueError: if a threshold lies outside its range.
     """
     _validate_thresholds(
@@ -291,6 +365,8 @@ def compare(
         min_samples=min_samples,
         max_judge_error_rate=max_judge_error_rate,
     )
+    if check_identity:
+        check_comparable(baseline, candidate)
 
     rows, unmatched = _match(baseline, candidate)
     baseline_passes = sum(row.baseline_passes for row in rows)
@@ -318,5 +394,6 @@ def compare(
         criteria=tuple(rows),
         cases=_cases(rows),
         unmatched=tuple(unmatched),
+        identity=_identity(baseline, candidate, checked=check_identity),
     )
     return replace(undecided, verdict=_decide(undecided))

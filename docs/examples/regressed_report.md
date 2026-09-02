@@ -415,3 +415,5 @@ Judge:
 Run `2026-09-02T10-17-35Z` · samples 1 · target model `gemini-3.5-flash-lite` · judge model `gemini-3.5-flash-lite`
 
 Prompt `2d7c9a789e0d…` · judge prompt `048c0417498d…` · goldens `24f82d63a7ac…` · baseline runs `2026-09-02T09-29-44Z`, `2026-09-02T09-31-38Z`
+
+Comparability: target model `gemini-3.5-flash-lite`, judge model `gemini-3.5-flash-lite`, judge prompt `048c0417498d…`, goldens `24f82d63a7ac…` — matched against the baseline before anything was compared.

@@ -203,9 +203,11 @@ detectable. This is why `min_samples` exists and why baselines should pool runs.
 opinion, not the truth. A judge that drifts — a model update, a reworded rubric —
 moves the candidate's pass rate with no change to the target at all, and the test
 will faithfully report a significant drop. Nothing in stage 03 can detect this;
-the defences are outside it: pinning `judge_model_id` and `judge_prompt_sha256`
-in the baseline and refusing to pool runs that disagree, and `calibrate.py`,
-which compares the judge against human labels. Watch its `false_pass` count.
+the defences are outside the test: the baseline pins `judge_model_id` and
+`judge_prompt_sha256`, stage 03 refuses to pool runs that disagree on them *and*
+refuses to compare a candidate that disagrees with the baseline, and
+`calibrate.py` compares the judge against human labels. Watch its `false_pass`
+count.
 
 **Judge errors are assumed to be missing at random.** Excluded rows are almost
 always rate limits, which have nothing to do with the content being graded. If
@@ -221,6 +223,8 @@ per-criterion rows as 67 significance tests, because they are not.
 
 **A drop is not a diagnosis.** Stage 03 says the quality fell. It does not say
 the prompt is the cause; a provider-side model change produces exactly the same
-signal. That is why the baseline pins the target model id, and why an
+signal. That is why the baseline pins the target model id, why stage 03 refuses
+to compare a run recorded under a different one — an intentional model swap is
+never a regression, it is a new measurement needing a new baseline — and why an
 unexplained regression is worth checking against the provider's changelog before
 it is blamed on the diff.

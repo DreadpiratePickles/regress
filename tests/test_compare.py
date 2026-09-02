@@ -11,10 +11,11 @@ from fractions import Fraction
 
 import pytest
 
-from regression_detect.baseline import Baseline, CriterionStat
+from regression_detect.baseline import Baseline, BaselineInputError, CriterionStat
 from regression_detect.compare import (
     DEFAULT_MAX_JUDGE_ERROR_RATE,
     DEFAULT_MIN_SAMPLES,
+    ComparabilityError,
     Verdict,
     compare,
     fisher_exact_one_sided,
@@ -61,16 +62,19 @@ def make_baseline(
     run_ids: tuple[str, ...] = ("run-a",),
     target_model_id: str = "test-target",
     judge_model_id: str = "test-judge",
+    goldens_sha256: str = "a" * 64,
+    prompt_sha256: str = "b" * 64,
+    judge_prompt_sha256: str = "c" * 64,
 ) -> Baseline:
     """A `Baseline` built directly, without touching the filesystem."""
     return Baseline(
         schema_version=1,
         created_at_utc="2026-01-01T00:00:00Z",
         run_ids=run_ids,
-        goldens_sha256="a" * 64,
-        prompt_sha256="b" * 64,
+        goldens_sha256=goldens_sha256,
+        prompt_sha256=prompt_sha256,
         target_model_id=target_model_id,
-        judge_prompt_sha256="c" * 64,
+        judge_prompt_sha256=judge_prompt_sha256,
         judge_model_id=judge_model_id,
         criteria=tuple(stats),
         total_n=sum(item.n for item in stats),
@@ -268,6 +272,108 @@ def test_compare_rejects_impossible_thresholds(kwargs, message):
     settings = {"alpha": 0.05, "min_effect": 0.05, **kwargs}
     with pytest.raises(ValueError, match=message):
         compare(make_baseline(spread(10, 10)), make_baseline(spread(10, 10)), **settings)
+
+
+# --------------------------------------------------------------------------
+# compare — comparability: did the two sides measure the same thing?
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("field", "other", "expected"),
+    [
+        ("goldens_sha256", "9" * 64, "goldens_sha256"),
+        ("target_model_id", "another-target", "target_model_id"),
+        ("judge_model_id", "another-judge", "judge_model_id"),
+        ("judge_prompt_sha256", "9" * 64, "judge_prompt_sha256"),
+    ],
+)
+def test_compare_refuses_a_candidate_that_measured_something_else(field, other, expected):
+    """Each checked field, on its own, is enough to refuse the comparison."""
+    baseline = make_baseline(spread(40, 40))
+    candidate = make_baseline(spread(30, 40), **{field: other})
+
+    with pytest.raises(ComparabilityError) as caught:
+        compare(baseline, candidate, alpha=0.05, min_effect=0.05)
+
+    message = str(caught.value)
+    assert expected in message
+    assert other in message
+    assert str(getattr(baseline, field)) in message
+
+
+def test_a_comparability_error_is_an_input_error():
+    """It exits 3 rather than 1 because CI must not read it as a regression."""
+    assert issubclass(ComparabilityError, BaselineInputError)
+
+
+def test_a_comparability_error_names_the_remedy():
+    baseline = make_baseline(spread(40, 40))
+    candidate = make_baseline(spread(40, 40), target_model_id="another-target")
+
+    with pytest.raises(ComparabilityError) as caught:
+        compare(baseline, candidate, alpha=0.05, min_effect=0.05)
+
+    message = str(caught.value)
+    assert "TARGET_MODEL_ID" in message
+    assert "JUDGE_MODEL_ID" in message
+    assert "new baseline" in message
+
+
+def test_a_changed_target_prompt_is_not_a_mismatch():
+    """The target prompt is the thing under test: it is expected to differ."""
+    baseline = make_baseline(spread(40, 40), prompt_sha256="1" * 64)
+    candidate = make_baseline(spread(40, 40), prompt_sha256="2" * 64)
+
+    result = compare(baseline, candidate, alpha=0.05, min_effect=0.05)
+
+    assert result.verdict is Verdict.NO_REGRESSION
+    prompts = result.to_json()["identity"]["target_prompt_sha256"]
+    assert prompts == {"baseline": "1" * 64, "candidate": "2" * 64}
+
+
+def test_matching_identity_compares_normally():
+    result = compare(
+        make_baseline(spread(65, 67)),
+        make_baseline(spread(55, 67)),
+        alpha=0.05,
+        min_effect=0.05,
+    )
+    assert result.verdict is Verdict.REGRESSION
+
+
+def test_the_comparison_records_the_identity_it_checked():
+    result = compare(
+        make_baseline(spread(40, 40)),
+        make_baseline(spread(40, 40)),
+        alpha=0.05,
+        min_effect=0.05,
+    )
+    identity = result.to_json()["identity"]
+
+    assert identity["checked"] is True
+    assert identity["target_model_id"] == {"baseline": "test-target", "candidate": "test-target"}
+    assert identity["judge_model_id"] == {"baseline": "test-judge", "candidate": "test-judge"}
+    assert identity["judge_prompt_sha256"]["candidate"] == "c" * 64
+    assert identity["goldens_sha256"]["candidate"] == "a" * 64
+
+
+def test_the_check_can_be_turned_off_and_says_so_in_the_record():
+    """`--dry-run` compares canned verdicts, so its identity is a placeholder."""
+    baseline = make_baseline(spread(40, 40))
+    candidate = make_baseline(spread(40, 40), target_model_id="dry-run-fake")
+
+    result = compare(
+        baseline, candidate, alpha=0.05, min_effect=0.05, check_identity=False
+    )
+    identity = result.to_json()["identity"]
+
+    assert result.verdict is Verdict.NO_REGRESSION
+    assert identity["checked"] is False
+    assert identity["target_model_id"] == {
+        "baseline": "test-target",
+        "candidate": "dry-run-fake",
+    }
 
 
 # --------------------------------------------------------------------------

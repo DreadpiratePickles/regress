@@ -241,6 +241,37 @@ def _evidence_section(data: ReportData) -> list[str]:
     return ["### What the judge saw", "", *blocks]
 
 
+def _comparability(comparison: dict[str, Any]) -> list[str]:
+    """One line saying what made the candidate and the baseline comparable at all.
+
+    Read from `comparison.json` rather than from the run's own manifests: the
+    footer's other lines describe this run, while this line describes what stage
+    03 checked the run against. A comparison written before this check existed
+    carries no `identity`, and then the line is omitted rather than guessed at.
+    """
+    identity = comparison.get("identity")
+    if not isinstance(identity, dict):
+        return []
+
+    def side(field: str) -> str:
+        pair = identity.get(field)
+        return pair.get("candidate", "") if isinstance(pair, dict) else ""
+
+    line = (
+        f"Comparability: target model `{side('target_model_id')}`, "
+        f"judge model `{side('judge_model_id')}`, "
+        f"judge prompt `{_short(side('judge_prompt_sha256'))}`, "
+        f"goldens `{_short(side('goldens_sha256'))}`"
+    )
+    if identity.get("checked"):
+        return [f"{line} — matched against the baseline before anything was compared.", ""]
+    return [
+        f"{line} — **not checked**: these are this run's own values and nothing "
+        "asserts the baseline shares them.",
+        "",
+    ]
+
+
 def _footer(data: ReportData) -> list[str]:
     provenance = data.provenance
     baseline = ", ".join(f"`{run_id}`" for run_id in provenance.baseline_run_ids) or "—"
@@ -256,6 +287,7 @@ def _footer(data: ReportData) -> list[str]:
         f"goldens `{_short(provenance.goldens_sha256)}` · "
         f"baseline runs {baseline}",
         "",
+        *_comparability(data.comparison),
     ]
 
 

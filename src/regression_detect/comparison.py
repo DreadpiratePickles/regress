@@ -131,6 +131,52 @@ class UnmatchedCriterion:
         }
 
 
+CHECKED_IDENTITY_FIELDS = (
+    "goldens_sha256",
+    "target_model_id",
+    "judge_model_id",
+    "judge_prompt_sha256",
+)
+"""The `Baseline` fields the candidate must share with the baseline. The target
+prompt is deliberately absent: changing it is the usual thing under test."""
+
+
+def _sides(values: tuple[str, str]) -> dict[str, str]:
+    return {"baseline": values[0], "candidate": values[1]}
+
+
+@dataclass(frozen=True)
+class ComparedIdentity:
+    """What each side says it measured. Every field is `(baseline, candidate)`.
+
+    Both sides are recorded even for the fields that had to agree, so a reader of
+    `comparison.json` never has to open the baseline file to see what the verdict
+    was measured against. `target_prompt_sha256` is the one field allowed to
+    differ, and the one a reviewer most wants to see: it is the change under test.
+
+    `checked` is false only where comparability could not be enforced — a dry run
+    whose model ids are placeholders — and then nothing asserts the first four
+    fields agree.
+    """
+
+    goldens_sha256: tuple[str, str]
+    target_model_id: tuple[str, str]
+    judge_model_id: tuple[str, str]
+    judge_prompt_sha256: tuple[str, str]
+    target_prompt_sha256: tuple[str, str]
+    checked: bool = True
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "checked": self.checked,
+            "goldens_sha256": _sides(self.goldens_sha256),
+            "target_model_id": _sides(self.target_model_id),
+            "judge_model_id": _sides(self.judge_model_id),
+            "judge_prompt_sha256": _sides(self.judge_prompt_sha256),
+            "target_prompt_sha256": _sides(self.target_prompt_sha256),
+        }
+
+
 @dataclass(frozen=True)
 class ComparisonResult:
     """The whole comparison: the numbers, the thresholds, the verdict, and why."""
@@ -152,6 +198,9 @@ class ComparisonResult:
     criteria: tuple[CriterionComparison, ...]
     cases: tuple[CaseComparison, ...]
     unmatched: tuple[UnmatchedCriterion, ...]
+    identity: ComparedIdentity | None = None
+    """What the two sides measured. `None` only for a result built by hand in a
+    test; `compare()` always records one."""
 
     @property
     def baseline_rate(self) -> float | None:
@@ -205,7 +254,7 @@ class ComparisonResult:
         return explain(self)
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
             "verdict": self.verdict.value,
             "explanation": self.explain(),
@@ -240,6 +289,9 @@ class ComparisonResult:
             "criteria": [row.to_json() for row in self.criteria],
             "unmatched": [item.to_json() for item in self.unmatched],
         }
+        if self.identity is not None:
+            payload["identity"] = self.identity.to_json()
+        return payload
 
 
 def percent(rate: float | None) -> str:

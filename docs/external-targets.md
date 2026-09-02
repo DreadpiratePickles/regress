@@ -137,7 +137,8 @@ pass rates is the difference between two features, not a regression in either.
 So: **build a new baseline per target.** The identity fields make this visible
 rather than silent — a run through the external example records
 `model_id = "command:fdd00b9726fe751c"` where the summarizer baseline records
-`gemini-3.5-flash-lite`.
+`gemini-3.5-flash-lite` — and stage 03 acts on it: comparing that run against the
+summarizer baseline is a `ComparabilityError` and exit 3, not a verdict.
 
 ```bash
 # two judged runs of YOUR target, then a baseline of your own

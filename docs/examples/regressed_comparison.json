@@ -1225,6 +1225,29 @@
     }
   ],
   "unmatched": [],
+  "identity": {
+    "checked": true,
+    "goldens_sha256": {
+      "baseline": "24f82d63a7ac88c34d08e7cfd06f6ffaffa7ca9647ce46799e5774e90378b177",
+      "candidate": "24f82d63a7ac88c34d08e7cfd06f6ffaffa7ca9647ce46799e5774e90378b177"
+    },
+    "target_model_id": {
+      "baseline": "gemini-3.5-flash-lite",
+      "candidate": "gemini-3.5-flash-lite"
+    },
+    "judge_model_id": {
+      "baseline": "gemini-3.5-flash-lite",
+      "candidate": "gemini-3.5-flash-lite"
+    },
+    "judge_prompt_sha256": {
+      "baseline": "048c0417498d8ad66c5f613099013240020c7861b4311e303866539183a21803",
+      "candidate": "048c0417498d8ad66c5f613099013240020c7861b4311e303866539183a21803"
+    },
+    "target_prompt_sha256": {
+      "baseline": "015ab25af07a58d71ce1f6091e6a1a2545b176bf367bbb0322569372843af54d",
+      "candidate": "2d7c9a789e0deec819261334e8b94e90f4d11bf60940884a4dec7d0887f0f092"
+    }
+  },
   "baseline_source": {
     "created_at_utc": "2026-09-02T09:51:24Z",
     "run_ids": [

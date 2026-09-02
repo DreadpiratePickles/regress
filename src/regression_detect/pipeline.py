@@ -74,9 +74,17 @@ def detect(
 ) -> DetectOutcome:
     """Run stage 01, then stage 02, then stage 03, and return all three results.
 
+    A dry run skips stage 03's comparability check, and records that it did. Its
+    providers are canned, so its manifests record `dry-run-fake` rather than a
+    model id; enforcing identity there would make exit 3 the normal outcome of
+    the offline smoke test, and writing the baseline's model ids into a manifest
+    no model produced would be worse — a run that names a model nobody called.
+
     Raises:
         ConfigFileError: if `regression.toml` is missing or invalid.
-        BaselineInputError: if the baseline or the finished run cannot be read.
+        BaselineInputError: if the baseline or the finished run cannot be read,
+            or (as `ComparabilityError`) if the run did not measure what the
+            baseline measured.
         GoldenDatasetError: if the dataset is missing or invalid.
         JudgeRunError: if the run directory stage 02 reads back is malformed.
         ProviderConfigError: if the provider cannot be built.
@@ -115,6 +123,7 @@ def detect(
         min_effect=settings.min_effect,
         min_samples=settings.min_samples,
         max_judge_error_rate=settings.max_judge_error_rate,
+        check_identity=not dry_run,
     )
 
     comparison_path = write_comparison(result, run_summary.out_dir, baseline=baseline)
@@ -199,6 +208,12 @@ def _print_outcome(outcome: DetectOutcome) -> None:
     )
     print(f"  Stage 03: {display_path(outcome.comparison_path)}")
     print(f"  Stage 04: {display_path(outcome.report_path)}")
+    identity = outcome.comparison.identity
+    if identity is not None and not identity.checked:
+        print(
+            "  Comparability: not checked — this was a dry run, so its model ids are "
+            "placeholders and nothing asserts it measured what the baseline measured."
+        )
     print()
     print(render_report(outcome.comparison))
 
