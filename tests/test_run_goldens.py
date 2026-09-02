@@ -6,8 +6,11 @@ The runner is exercised entirely through FakeProvider; no test calls the network
 import json
 from pathlib import Path
 
+import pytest
+
+from regression_detect import runner
 from regression_detect.goldens import load_goldens
-from regression_detect.providers.base import ProviderTransientError
+from regression_detect.providers.base import ProviderConfigError, ProviderTransientError
 from regression_detect.providers.fake import FakeProvider
 from regression_detect.review import REVIEW_INPUT_MAX_CHARS
 from regression_detect.runner import main, run_goldens
@@ -254,3 +257,54 @@ def test_cli_reports_a_bad_goldens_path_without_a_traceback(tmp_path: Path) -> N
     )
 
     assert exit_code != 0
+
+
+def test_cli_exits_one_when_a_case_fails_but_still_writes_every_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_dir = tmp_path / "runs"
+    monkeypatch.setattr(
+        runner,
+        "_build_provider",
+        lambda *, dry_run: OneCaseFailsProvider(marker="Brightloom"),
+    )
+
+    exit_code = main(
+        [
+            "--goldens",
+            str(REAL_GOLDENS),
+            "--samples",
+            "1",
+            "--runs-dir",
+            str(runs_dir),
+        ]
+    )
+
+    assert exit_code == 1
+    run_dirs = list(runs_dir.iterdir())
+    assert len(run_dirs) == 1
+    for filename in ("outputs.jsonl", "manifest.json", "review.md"):
+        assert (run_dirs[0] / filename).is_file()
+    manifest = json.loads((run_dirs[0] / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["counts"]["failed"] == 1
+    assert manifest["counts"]["ok"] == CASE_COUNT - 1
+
+
+def test_cli_exits_two_when_the_provider_cannot_be_built(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(*, dry_run: bool) -> None:
+        raise ProviderConfigError("GEMINI_API_KEY is not set.")
+
+    monkeypatch.setattr(runner, "_build_provider", refuse)
+
+    exit_code = main(
+        [
+            "--goldens",
+            str(REAL_GOLDENS),
+            "--runs-dir",
+            str(tmp_path / "runs"),
+        ]
+    )
+
+    assert exit_code == 2
