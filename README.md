@@ -4,7 +4,7 @@ A CI check that answers one question every time a prompt or a model changes:
 **did this make the feature worse?** — with a verdict that survives the fact that
 the feature is stochastic.
 
-[![regression](https://github.com/getshitonltd/model-regression-detection/actions/workflows/regression.yml/badge.svg)](https://github.com/getshitonltd/model-regression-detection/actions/workflows/regression.yml)
+[![regression](https://github.com/DreadpiratePickles/model-regression-detection/actions/workflows/regression.yml/badge.svg)](https://github.com/DreadpiratePickles/model-regression-detection/actions/workflows/regression.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)](.python-version)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![tests: 565](https://img.shields.io/badge/tests-565-brightgreen)](tests/)
@@ -204,7 +204,7 @@ Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is pinned in
 `.python-version`; uv installs it.
 
 ```bash
-git clone https://github.com/getshitonltd/model-regression-detection
+git clone https://github.com/DreadpiratePickles/model-regression-detection
 cd model-regression-detection
 uv sync
 ```
@@ -380,10 +380,15 @@ Two repository secrets:
 The workflow grants `pull-requests: write` and nothing more. There is no auto-merge,
 no label change, no branch write, no status override.
 
-**Honest status: this workflow has not yet executed on GitHub as of this commit.**
-It was written and reviewed against the four stage contracts, and every command it
-runs has been run locally, but the repository is being published now and no Actions
-run exists to point at. The badge above will tell you the moment that changes.
+**Honest status: half of this workflow has now run on GitHub, and half has not.**
+The `unit` job ran green on the first push to `main` — lint, the full test suite
+and the offline dry run, 18 seconds, [run
+33625981057](https://github.com/DreadpiratePickles/model-regression-detection/actions/runs/33625981057).
+The `scope` and `regression` jobs were skipped on that run because they only run
+on pull requests, so the live regression check is still **unexercised**: it needs
+a pull request that touches the measured surface and a `GEMINI_API_KEY` secret,
+neither of which exists yet. Read that part as reviewed design, not as verified
+behaviour. The badge above tracks the workflow as a whole.
 
 ---
 
@@ -519,7 +524,8 @@ from a real run, not a mock-up.
 |---|---|
 | Stages 01–04, three target adapters, baseline tooling, calibration tooling | Implemented and unit-tested |
 | End-to-end detection against a live model | Verified: a real regression caught, and a control run correctly cleared |
-| GitHub Actions workflow | Written and reviewed; **has not run on GitHub yet** |
+| CI `unit` job (lint, tests, offline dry run) | Verified on GitHub: green on the first push to `main`, [run 33625981057](https://github.com/DreadpiratePickles/model-regression-detection/actions/runs/33625981057) |
+| CI `scope` + `regression` jobs (the live check) | Written and reviewed; **not yet exercised** — needs a pull request touching the measured surface and a `GEMINI_API_KEY` secret |
 | Slack alert | Payload built and tested; **no real webhook send has been performed** |
 | Judge calibration | Tooling implemented; **no human labels collected, so no agreement rate is published** |
 
