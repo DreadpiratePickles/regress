@@ -44,8 +44,12 @@ class SampleResult:
         }
 
 
-def _fenced(text: str) -> str:
-    """Fence a block of text, using a longer fence if the text contains one."""
+def fence_text(text: str) -> str:
+    """Fence a block of text, using a longer fence if the text contains one.
+
+    Shared with the stage-02 report so both human-facing documents quote model
+    output the same way.
+    """
     fence = "```"
     while fence in text:
         fence += "`"
@@ -54,7 +58,7 @@ def _fenced(text: str) -> str:
 
 def _render_input(case: GoldenCase) -> str:
     if len(case.input) <= REVIEW_INPUT_MAX_CHARS:
-        return _fenced(case.input)
+        return fence_text(case.input)
     head = case.input[:REVIEW_INPUT_MAX_CHARS]
     dropped = len(case.input) - REVIEW_INPUT_MAX_CHARS
     note = (
@@ -62,7 +66,7 @@ def _render_input(case: GoldenCase) -> str:
         f"of {len(case.input)} characters ({dropped} not shown). The full ticket was "
         f"sent to the model; read it in the goldens file._"
     )
-    return _fenced(head) + note
+    return fence_text(head) + note
 
 
 def _render_case(case: GoldenCase, results: list[SampleResult]) -> str:
@@ -82,7 +86,7 @@ def _render_case(case: GoldenCase, results: list[SampleResult]) -> str:
             lines.append(f"**Sample {result.sample_index + 1} of {len(results)}**")
             lines.append("")
         if result.ok and result.output is not None:
-            lines.append(_fenced(result.output))
+            lines.append(fence_text(result.output))
         else:
             lines.append(f"**FAILED** — `{result.error_type}`: {result.error}")
         lines.append("")
