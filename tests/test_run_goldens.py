@@ -265,7 +265,7 @@ def test_cli_exits_one_when_a_case_fails_but_still_writes_every_artifact(
     runs_dir = tmp_path / "runs"
     monkeypatch.setattr(
         runner,
-        "_build_provider",
+        "build_provider",
         lambda *, dry_run: OneCaseFailsProvider(marker="Brightloom"),
     )
 
@@ -296,7 +296,7 @@ def test_cli_exits_two_when_the_provider_cannot_be_built(
     def refuse(*, dry_run: bool) -> None:
         raise ProviderConfigError("GEMINI_API_KEY is not set.")
 
-    monkeypatch.setattr(runner, "_build_provider", refuse)
+    monkeypatch.setattr(runner, "build_provider", refuse)
 
     exit_code = main(
         [

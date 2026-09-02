@@ -1,7 +1,7 @@
 # Model Regression Detection
 
-> Status: stages 01 and 02 built and running against a real model. Stages 03–04
-> are designed but not implemented — see `CONTEXT.md`.
+> Status: stages 01, 02 and 03 built and running against a real model. Stage 04
+> is designed but not implemented — see `CONTEXT.md`.
 
 A CI tool that answers one question every time a prompt or model changes:
 **did this change make the feature worse?** — and answers it before the change
@@ -25,7 +25,8 @@ reaches users.
 
 ## What makes this different
 
-- Variance-aware comparison instead of single-run thresholds.
+- Variance-aware comparison instead of single-run thresholds: a one-sided Fisher
+  exact test on counts, plus a minimum effect size, plus a hard-regression rule.
 - Judge calibration against human labels, and judge-drift detection.
 - No SaaS: baselines live in git, results live in PR comments, runs in your CI.
 - The repo guards its own built-in target feature (dogfooding).
@@ -102,6 +103,48 @@ per-minute provider quota bites here first. Pace it with
 Without pacing, most criteria come back as `ProviderTransientError` 429s: they
 are recorded honestly as unjudged, but they are not scores.
 
+### Compare
+
+Stage 03 is where the tool earns its name. A pass rate from one run is a sample,
+not a measurement: the same prompt scores 5/5 one afternoon and 4/5 the next, so
+thresholding a single run either cries wolf or misses the real thing. Instead the
+committed baseline and the candidate are compared as a 2×2 table of counts, and a
+drop is called a regression only when it is both **unlikely under noise**
+(one-sided Fisher exact p below `alpha`) and **big enough to matter** (at least
+`min_effect`) — or when a criterion that always passed now always fails.
+
+The whole pipeline in one command:
+
+```bash
+uv run python scripts/detect.py --baseline baselines/summarizer/baseline.json \
+  --samples 1 --min-interval-ms 6500
+```
+
+It runs stage 01, stage 02 and stage 03 in one process, writes `comparison.json`
+into the run directory, prints the reasoning, and exits `0` NO_REGRESSION,
+`1` REGRESSION, `2` INCONCLUSIVE, `3` bad input. Add `--dry-run` to exercise the
+whole thing offline. Thresholds live in `regression.toml`; the reasoning behind
+each of them is written up in [`docs/statistics.md`](docs/statistics.md).
+
+The baseline is built explicitly from judged runs and committed to git:
+
+```bash
+uv run python scripts/baseline.py build --runs runs/<ts-a> runs/<ts-b> \
+  --out baselines/summarizer/baseline.json
+uv run python scripts/baseline.py show --baseline baselines/summarizer/baseline.json
+```
+
+Pool at least two runs: one run gives every criterion `n = 1`, which cannot tell
+a flaky criterion from a stable one. To compare an already-judged run without
+running anything:
+
+```bash
+uv run python scripts/compare.py --baseline baselines/summarizer/baseline.json \
+  --candidate runs/<ts>
+```
+
+### Calibration
+
 Nothing grades the judge, so calibrate it against a human. Tick the criteria in
 that run's `review.md` by hand first — before reading `judged.md`, so the labels
 stay independent — then:
@@ -120,11 +163,18 @@ miss) and `false_fail` (noise). Nothing here calls a model.
 
 ```
 CONTEXT.md                     Layer 1 router: which stage owns which job
+regression.toml                thresholds a verdict rests on — no model ids here
 stages/01_run/CONTEXT.md       stage contract for the golden runner
 stages/02_judge/CONTEXT.md     stage contract for the judge
+stages/03_compare/CONTEXT.md   stage contract for the comparison
+docs/statistics.md             why stage 03 uses these tests, and their limits
 goldens/                       golden dataset (cases + criteria) — human-authored
+baselines/                     committed reference scores; see baselines/README.md
 scripts/run_goldens.py         stage 01 entry point
 scripts/judge_run.py           stage 02 entry point
+scripts/baseline.py            build and show a baseline
+scripts/compare.py             stage 03 entry point
+scripts/detect.py              all three stages in one command
 scripts/calibrate.py           judge calibration entry point
 src/regression_detect/
   goldens.py                   dataset loader + validation
@@ -133,6 +183,13 @@ src/regression_detect/
   judge_runner.py              stage 02: judge each criterion, write verdicts
   judge_inputs.py              reads a stage-01 run back in, validated
   scoring.py                   verdict records, pass-rate arithmetic, judged.md
+  baseline_inputs.py           reads a judged run back in, validated
+  baseline.py                  stage 03: pool judged runs into a baseline
+  compare.py                   stage 03: Fisher exact, Wilson, the decision rule
+  comparison.py                the comparison record, its JSON, and explain()
+  compare_run.py               stage 03 CLI: read, compare, write comparison.json
+  pipeline.py                  runs stages 01 → 02 → 03 in one process
+  config_file.py               reads and validates regression.toml
   calibration.py               human ticks vs judge verdicts — no model call
   providers/                   the provider seam — the only vendor-aware code
     base.py                    Provider protocol + typed errors

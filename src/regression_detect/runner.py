@@ -214,7 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build_provider(*, dry_run: bool) -> Provider:
+def build_provider(*, dry_run: bool) -> Provider:
     if dry_run:
         return FakeProvider(DRY_RUN_SUMMARY, model_id="dry-run-fake")
     from .providers.gemini import gemini_provider_from_env
@@ -227,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     try:
-        provider = _build_provider(dry_run=args.dry_run)
+        provider = build_provider(dry_run=args.dry_run)
         out_dir = Path(args.runs_dir) / run_directory_name()
         summary = run_goldens(
             goldens_path=args.goldens,

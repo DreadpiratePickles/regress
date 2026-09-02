@@ -1,0 +1,38 @@
+# Configuration for the regression detector.
+#
+# These are the numbers that decide a build's fate, so they live in one
+# reviewable file rather than as literals inside a comparison function. Changing
+# any of them changes what counts as a regression: treat an edit here the way
+# you would treat an edit to a test threshold.
+#
+# Model identifiers are deliberately absent. They live in
+# `src/regression_detect/target/config.py` and `src/regression_detect/judge/config.py`
+# and nowhere else; this file only names the environment variables that override
+# them, so a CI job can be told which knob to set without learning a model name.
+
+[compare]
+# Significance level for the one-sided Fisher exact test. A drop must be this
+# unlikely under the null "nothing changed" before it is called a regression.
+alpha = 0.05
+
+# Smallest pass-rate drop worth failing a build over, as a fraction (0.05 = 5
+# percentage points). Statistical significance alone is not enough: with a large
+# enough sample, a half-point drop is significant and still not worth blocking.
+min_effect = 0.05
+
+# Fewest judged criteria the candidate must have before any verdict other than
+# INCONCLUSIVE is reported. Below this, absence of evidence is not evidence.
+min_samples = 30
+
+# Largest share of candidate judge calls that may have failed before the run is
+# treated as unreadable rather than as a result.
+max_judge_error_rate = 0.2
+
+[run]
+# Samples per golden case for `scripts/detect.py` when --samples is not given.
+samples = 1
+
+[models]
+# Environment variables that override the model ids in the two config modules.
+target_model_id_env = "TARGET_MODEL_ID"
+judge_model_id_env = "JUDGE_MODEL_ID"

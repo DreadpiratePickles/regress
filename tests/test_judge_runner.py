@@ -437,7 +437,7 @@ def test_cli_exits_one_when_a_judge_call_failed(
     run_dir = build_stage_01_run(tmp_path)
     monkeypatch.setattr(
         judge_runner,
-        "_build_provider",
+        "build_provider",
         lambda *, dry_run: OneCriterionFailsProvider(marker=UNIQUE_CRITERION),
     )
 
