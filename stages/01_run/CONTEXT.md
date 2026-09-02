@@ -5,55 +5,72 @@
 Run every golden case through the target feature and record each raw output,
 with the evidence needed to reproduce and grade it.
 
+"The target feature" is whatever the `[target]` section names, not necessarily
+this repository's summarizer. The stage talks to a `Target` — text in, text out,
+plus its provenance — so it can measure a feature it did not write.
+
 ## Inputs
 
 | Path or source | Layer | Authority | Required | Relevant section |
 |---|---:|---|---:|---|
 | `goldens/cases.yaml` | 3 | Authoritative | Yes | Whole file: every case is run |
 | `goldens/README.md` | 3 | Authoritative | No | Case rules — read when a case looks wrong |
-| `src/regression_detect/target/prompts/summarize_v1.md` | 3 | Authoritative | Yes | Whole file: sent as the system prompt |
-| `src/regression_detect/target/config.py` | 3 | Authoritative | Yes | `target_model_id()` — the model called |
+| `regression.toml` | 3 | Authoritative | No | `[target]` — which feature is run. Absent, or no `--config`, means the built-in summarizer |
+| `src/regression_detect/target/adapters/` | 3 | Authoritative | Yes | The `Target` protocol and the three adapters |
+| `docs/external-targets.md` | 3 | Authoritative | No | How to point the stage at your own feature |
+| `src/regression_detect/target/prompts/summarize_v1.md` | 3 | Authoritative | For the builtin target | Whole file: sent as the system prompt |
+| `src/regression_detect/target/config.py` | 3 | Authoritative | For the builtin target | `target_model_id()` — the model called |
 | `TARGET_MODEL_ID` (environment) | 3 | Override | No | Overrides the default model id |
-| `GEMINI_API_KEY` (`.env`, environment) | 3 | Authoritative | Yes, unless `--dry-run` | The provider credential; never logged |
+| `GEMINI_API_KEY` (`.env`, environment) | 3 | Authoritative | For the builtin target, unless `--dry-run` | The provider credential; never logged |
+| `--config` (CLI) | 4 | Operator input | No | Config file whose `[target]` picks the feature |
 | `--samples` (CLI) | 4 | Operator input | No | Samples per case; default 1 |
 
 ## Process
 
-Steps 1–4 and 7–10 are deterministic code. Step 6 is the only model call.
+Steps 1–5 and 8–11 are deterministic code. Step 7 is the only call out.
 
 1. Parse and validate CLI arguments; reject a non-positive `--samples`.
-2. Build the provider: `FakeProvider` under `--dry-run`, otherwise a Gemini
-   provider from `GEMINI_API_KEY`. A missing key fails here with an actionable
-   message and never reaches step 6.
+2. Build the target. Without `--config`, that is the built-in summarizer over a
+   provider — `FakeProvider` under `--dry-run`, otherwise a Gemini provider from
+   `GEMINI_API_KEY`. With `--config`, the `[target]` section decides: `builtin`,
+   `command` (argv list, `shell=False`, env allowlist) or `http`. An unknown
+   kind, a missing required key, or a key that does not belong to the kind is a
+   `TargetConfigError` here, before anything is spent. A missing API key fails
+   here too and never reaches step 7.
 3. Load and validate the golden dataset: list shape, required keys, snake_case
    ids, unique ids, non-empty criteria. Any violation aborts before any spend.
-4. Hash the dataset file and the prompt file (SHA-256) and create the run
-   directory `runs/<UTC timestamp>/`.
-5. For each case, for each sample index, validate the ticket at the boundary
-   (type, non-whitespace, length ≤ 20,000 characters).
-6. **Model call.** Send the system prompt and the ticket — wrapped in `<ticket>`
-   delimiters as the user message, never formatted into the system prompt — and
-   receive one summary. Transient failures retry at most 3 times with
-   exponential backoff and jitter.
-7. Validate the reply: a non-empty string after stripping, or the sample is
-   recorded as a failure. Model output is untrusted input.
-8. Record the sample: output or error, model id, prompt hash, latency. A failed
-   sample does not abort the run.
-9. Write `outputs.jsonl`, `manifest.json`, and `review.md`.
-10. Print the counts and exit non-zero if any sample failed.
+4. Read `target.provenance()` and derive the run's identity: `prompt_sha256` and
+   `model_id` for the built-in target, and for any other the SHA-256 of the whole
+   provenance block and the `target_id`. A missing prompt file fails here.
+5. Hash the dataset file (SHA-256) and create the run directory
+   `runs/<UTC timestamp>/`.
+6. For each case, for each sample index, the target validates the input at its
+   boundary (type, non-whitespace, length ≤ 20,000 characters).
+7. **The target call.** `target.run(case.input)`. For the built-in target that
+   is the system prompt plus the ticket wrapped in `<ticket>` delimiters as the
+   user message, never formatted into the system prompt, with transient failures
+   retried at most 3 times with exponential backoff and jitter. For a command
+   target it is a subprocess with the input on stdin; for an http target, one
+   POST.
+8. Validate the reply: a non-empty string after stripping, or the sample is
+   recorded as a failure. A target's output is untrusted input.
+9. Record the sample: output or error, model id, identity hash, latency. A
+   failed sample does not abort the run.
+10. Write `outputs.jsonl`, `manifest.json`, and `review.md`.
+11. Print the counts and exit non-zero if any sample failed.
 
 ## Outputs
 
 | Path | Schema or format | Consumer |
 |---|---|---|
 | `runs/<UTC timestamp>/outputs.jsonl` | One JSON object per line: `case_id`, `sample_index`, `output` (string or null), `model_id`, `prompt_sha256`, `latency_ms`, `error` (string or null), `error_type` (string or null) | Stage 02 (judge) |
-| `runs/<UTC timestamp>/manifest.json` | JSON: `run_id`, `stage`, `started_at_utc`, `finished_at_utc`, `goldens_path`, `goldens_sha256`, `prompt_path`, `prompt_sha256`, `model_id`, `provider_class`, `temperature`, `samples`, `case_count`, `counts.{ok,failed,total}` | Stage 03 (compare), and any human auditing provenance |
+| `runs/<UTC timestamp>/manifest.json` | JSON: `run_id`, `stage`, `started_at_utc`, `finished_at_utc`, `goldens_path`, `goldens_sha256`, `prompt_path`, `prompt_sha256`, `model_id`, `provider_class`, `temperature`, `samples`, `case_count`, `target_id`, `target` (the adapter's provenance), `counts.{ok,failed,total}` | Stage 03 (compare), and any human auditing provenance |
 | `runs/<UTC timestamp>/review.md` | Markdown: per case the id, tags, input (truncated at 600 characters with a note), output or error, and the criteria as `- [ ]` checkboxes | A human grader |
 | Process exit code | `0` all samples ok · `1` at least one sample failed · `2` bad configuration or invalid dataset | CI |
 
 ## Verify
 
-- `uv run pytest -q` — 451 tests across all four stages, all passing, none
+- `uv run pytest -q` — 560 tests across all four stages, all passing, none
   touching the network.
 - `uv run ruff check .` — clean at line-length 100.
 - `uv run python scripts/run_goldens.py --dry-run` — exits 0 and writes all
@@ -79,6 +96,8 @@ model call and its own run directory.
 | Failure | Behavior |
 |---|---|
 | `GEMINI_API_KEY` missing or rejected | `ProviderConfigError` before any case runs; exit 2; message names the variable, never the key |
+| `[target]` names an unknown kind, or omits or misuses a key | `TargetConfigError` naming the kind or the key; exit 2; nothing is run |
+| An external target exits non-zero, times out, or answers with nothing | `TargetExecutionError` / `TargetTimeoutError` / `TargetResponseError`, recorded per sample with its `error_type`; the run continues. A failing command's stderr is quoted bounded and tail-first; the case input never is |
 | Golden dataset missing, unparseable, or invalid | `GoldenDatasetError` naming the offending case; exit 2; no run directory is treated as valid |
 | Prompt file missing | `FileNotFoundError`; exit 2. Never falls back to an empty or default prompt |
 | Rate limit, timeout, or 5xx on one call | Retried up to 3 attempts, exponential backoff with jitter; still failing, the sample is recorded with `error_type` and the run continues |

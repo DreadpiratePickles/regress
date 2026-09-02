@@ -55,6 +55,7 @@ class RegressionConfig:
     compare: CompareSettings
     run: RunSettings
     models: ModelEnvSettings
+    target: dict[str, Any]
 
 
 SECTIONS = {
@@ -62,6 +63,14 @@ SECTIONS = {
     "run": ("samples",),
     "models": ("target_model_id_env", "judge_model_id_env"),
 }
+
+TARGET_SECTION = "target"
+"""Which feature the goldens are run through. Kind-dependent, so it is checked
+here only far enough to know it is a table naming a kind; the per-kind keys are
+the target factory's business, and it raises `TargetConfigError` for them."""
+
+DEFAULT_TARGET_KIND = "builtin"
+"""A config that says nothing about a target means the packaged summarizer."""
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -143,6 +152,20 @@ def _non_empty_str(section: dict[str, Any], key: str, *, path: Path) -> str:
     return value.strip()
 
 
+def _target_section(document: dict[str, Any], *, path: Path) -> dict[str, Any]:
+    if TARGET_SECTION not in document:
+        return {"kind": DEFAULT_TARGET_KIND}
+    value = document[TARGET_SECTION]
+    if not isinstance(value, dict):
+        raise ConfigFileError(
+            f"{path}: [{TARGET_SECTION}] must be a table, got {type(value).__name__}"
+        )
+    kind = value.get("kind", DEFAULT_TARGET_KIND)
+    if not isinstance(kind, str) or not kind.strip():
+        raise ConfigFileError(f"{path}: [{TARGET_SECTION}] 'kind' must be a non-empty string")
+    return {**value, "kind": kind.strip()}
+
+
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> RegressionConfig:
     """Read and validate `regression.toml`.
 
@@ -153,7 +176,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> RegressionConfig:
     path = Path(path)
     document = _read_toml(path)
 
-    unknown = sorted(set(document) - set(SECTIONS))
+    unknown = sorted(set(document) - set(SECTIONS) - {TARGET_SECTION})
     if unknown:
         raise ConfigFileError(f"{path}: unknown section(s): {', '.join(unknown)}")
 
@@ -180,4 +203,5 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> RegressionConfig:
             target_model_id_env=_non_empty_str(models, "target_model_id_env", path=path),
             judge_model_id_env=_non_empty_str(models, "judge_model_id_env", path=path),
         ),
+        target=_target_section(document, path=path),
     )

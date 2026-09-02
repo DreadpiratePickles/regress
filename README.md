@@ -37,6 +37,11 @@ reaches users.
 - `v2` — an adapter for an external open-source LLM app, proving the tool is
   target-agnostic.
 
+Point the detector at your own feature — a program, an HTTP endpoint, or the
+built-in summarizer — with the `[target]` section of `regression.toml`; see
+[`docs/external-targets.md`](docs/external-targets.md) and the worked example in
+[`examples/external_target/`](examples/external_target/).
+
 ## Provider
 
 Model calls (the v1 target and the judge) go through a narrow provider adapter.
@@ -237,6 +242,7 @@ src/regression_detect/
     config.py                  judge model id, and the self-preference caveat
     prompts/judge_v1.md        the v1 judge system prompt
   target/                      the feature under test (v1: ticket summarizer)
+    adapters/                  the target seam: builtin, command and http targets
     summarizer.py              input/output validation, prompt loading
     config.py                  target model id — model names live only here
     prompts/summarize_v1.md    the v1 system prompt

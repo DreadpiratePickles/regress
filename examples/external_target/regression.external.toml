@@ -1,0 +1,47 @@
+# Point the detector at an app it did not write.
+#
+# Everything below the [target] section is the committed regression.toml
+# unchanged: the thresholds a verdict rests on do not depend on which feature is
+# being measured. Only [target] differs.
+#
+#     uv run python scripts/run_goldens.py \
+#         --config examples/external_target/regression.external.toml \
+#         --samples 1 --min-interval-ms 6500
+#
+# The app under test is examples/external_target/ticket_summarizer_app.py: its
+# own prompt, its own model id, its own error handling, and no import of
+# regression_detect. That is the point — it stands in for your feature.
+#
+# This run is NOT comparable to baselines/summarizer/baseline.json. That
+# baseline describes the built-in summarizer; this measures a different feature
+# with a different prompt. Build a baseline per target — see
+# docs/external-targets.md.
+
+[compare]
+alpha = 0.05
+min_effect = 0.05
+min_samples = 30
+max_judge_error_rate = 0.2
+
+[run]
+samples = 1
+
+[models]
+target_model_id_env = "TARGET_MODEL_ID"
+judge_model_id_env = "JUDGE_MODEL_ID"
+
+[target]
+kind = "command"
+
+# A list, never a shell string: nothing is passed to a shell, so no case input,
+# path or config value can turn into a command.
+argv = ["uv", "run", "python", "examples/external_target/ticket_summarizer_app.py"]
+
+# Generous, because a cold `uv run` resolves the environment before the app
+# starts, and the app then makes one model call of its own.
+timeout_s = 120.0
+
+# The child's whole environment, plus PATH. The app needs the API key; it does
+# not need — and does not get — anything else this process happens to hold. The
+# key's value lives in .env and never in this file.
+env_allowlist = ["GEMINI_API_KEY", "HOME", "TICKET_SUMMARIZER_MODEL_ID"]

@@ -42,3 +42,26 @@ samples = 1
 # Environment variables that override the model ids in the two config modules.
 target_model_id_env = "TARGET_MODEL_ID"
 judge_model_id_env = "JUDGE_MODEL_ID"
+
+[target]
+# Which feature the golden cases are run through. The default is the built-in
+# ticket summarizer this repository dogfoods; point it at your own feature and
+# nothing else about the tool changes. Three kinds exist, each with its own keys
+# (an unknown key is an error, not an ignored line):
+#
+#   kind = "builtin"  the packaged summarizer.
+#                     optional: prompt_path, temperature
+#   kind = "command"  any program: input on stdin, answer on stdout, non-zero
+#                     exit on failure. Nothing reaches a shell.
+#                     required: argv (a LIST of strings, never "prog arg")
+#                     optional: timeout_s, cwd, env_allowlist
+#   kind = "http"     a JSON endpoint, POSTed with {input_field: text}.
+#                     required: url
+#                     optional: timeout_s, input_field, output_field,
+#                               auth_header_env (the NAME of the variable
+#                               holding a bearer token — never the token)
+#
+# A target is an identity, not a setting: a baseline recorded against one target
+# says nothing about another, so build a new baseline per target. See
+# docs/external-targets.md, and examples/external_target/ for a worked example.
+kind = "builtin"

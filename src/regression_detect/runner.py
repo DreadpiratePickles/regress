@@ -17,13 +17,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .config_file import DEFAULT_TARGET_KIND, ConfigFileError, load_config
 from .goldens import GoldenDatasetError, goldens_sha256, load_goldens
 from .pacing import pace, validate_interval
 from .providers.base import Provider, ProviderConfigError, ProviderError
 from .providers.fake import FakeProvider
 from .review import SampleResult, render_review
+from .target.adapters.base import Target, TargetConfigError, TargetError, provenance_sha256
+from .target.adapters.builtin import BuiltinSummarizerTarget
+from .target.adapters.factory import load_target
 from .target.config import target_model_id
-from .target.summarizer import DEFAULT_PROMPT_PATH, SummarizerError, prompt_sha256, summarize
+from .target.summarizer import DEFAULT_PROMPT_PATH, SummarizerError
 
 DEFAULT_GOLDENS_PATH = Path("goldens") / "cases.yaml"
 DEFAULT_RUNS_DIR = Path("runs")
@@ -78,21 +82,20 @@ def _run_one_sample(
     ticket: str,
     case_id: str,
     sample_index: int,
-    provider: Provider,
-    prompt_path: Path,
+    target: Target,
+    model_id: str,
     prompt_hash: str,
-    temperature: float,
 ) -> SampleResult:
     """Run one case once. Typed failures become a recorded result, not a crash."""
     started = time.perf_counter()
     try:
-        output = summarize(ticket, provider, prompt_path=prompt_path, temperature=temperature)
-    except (ProviderError, SummarizerError) as exc:
+        output = target.run(ticket)
+    except (ProviderError, SummarizerError, TargetError) as exc:
         return SampleResult(
             case_id=case_id,
             sample_index=sample_index,
             output=None,
-            model_id=provider.model_id,
+            model_id=model_id,
             prompt_sha256=prompt_hash,
             latency_ms=int((time.perf_counter() - started) * 1000),
             error=str(exc),
@@ -102,7 +105,7 @@ def _run_one_sample(
         case_id=case_id,
         sample_index=sample_index,
         output=output,
-        model_id=provider.model_id,
+        model_id=model_id,
         prompt_sha256=prompt_hash,
         latency_ms=int((time.perf_counter() - started) * 1000),
     )
@@ -113,27 +116,43 @@ def run_goldens(
     goldens_path: Path,
     out_dir: Path,
     samples: int,
-    provider: Provider,
+    provider: Provider | None = None,
+    target: Target | None = None,
     prompt_path: Path = DEFAULT_PROMPT_PATH,
     temperature: float = 0.2,
     min_interval_ms: int = 0,
 ) -> RunSummary:
     """Run every golden case `samples` times and write the stage-01 outputs.
 
+    The case goes through a `Target`, not through the summarizer directly, so a
+    run can measure somebody else's feature. Passing `provider` and no `target`
+    keeps the built-in summarizer, which is what every existing caller does.
+
     Raises:
-        ValueError: if `samples` is not a positive integer, or `min_interval_ms`
-            is negative.
+        ValueError: if neither a provider nor a target was given, if `samples` is
+            not a positive integer, or `min_interval_ms` is negative.
         GoldenDatasetError: if the dataset is missing or invalid.
         FileNotFoundError: if the prompt file is missing.
     """
     if not isinstance(samples, int) or samples < 1:
         raise ValueError(f"samples must be a positive integer, got {samples!r}")
     validate_interval(min_interval_ms)
+    if target is None:
+        if provider is None:
+            raise ValueError("run_goldens needs either a provider or a target")
+        target = BuiltinSummarizerTarget(
+            provider, prompt_path=prompt_path, temperature=temperature
+        )
 
     goldens_path = Path(goldens_path)
-    prompt_path = Path(prompt_path)
     cases = load_goldens(goldens_path)
-    prompt_hash = prompt_sha256(prompt_path)
+    provenance = target.provenance()
+    # A built-in run keeps the two identifiers baselines were always pinned to.
+    # Any other target has neither, so its whole identity is hashed into the same
+    # field: a target change is a hash change, and a hash change invalidates a
+    # baseline instead of silently comparing two different features.
+    prompt_hash = provenance.get("prompt_sha256") or provenance_sha256(provenance)
+    model_id = provenance.get("model_id") or target.target_id
     started_at = utc_stamp()
 
     results: list[SampleResult] = []
@@ -146,10 +165,9 @@ def run_goldens(
                     ticket=case.input,
                     case_id=case.id,
                     sample_index=sample_index,
-                    provider=provider,
-                    prompt_path=prompt_path,
+                    target=target,
+                    model_id=model_id,
                     prompt_hash=prompt_hash,
-                    temperature=temperature,
                 )
             )
 
@@ -163,13 +181,15 @@ def run_goldens(
         "finished_at_utc": utc_stamp(),
         "goldens_path": display_path(goldens_path),
         "goldens_sha256": goldens_sha256(goldens_path),
-        "prompt_path": display_path(prompt_path),
+        "prompt_path": provenance.get("prompt_path", ""),
         "prompt_sha256": prompt_hash,
-        "model_id": provider.model_id,
-        "provider_class": type(provider).__name__,
+        "model_id": model_id,
+        "provider_class": provenance.get("provider_class", type(target).__name__),
         "temperature": temperature,
         "samples": samples,
         "case_count": len(cases),
+        "target_id": target.target_id,
+        "target": provenance,
         "counts": {"ok": ok, "failed": failed, "total": len(results)},
     }
 
@@ -222,6 +242,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help=(
+            "Config file whose [target] section names the feature to run "
+            "(default: the built-in summarizer, with no config file read)."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Use a canned in-memory provider instead of calling a model. No API key needed.",
@@ -237,23 +266,65 @@ def build_provider(*, dry_run: bool) -> Provider:
     return gemini_provider_from_env(target_model_id())
 
 
+def build_target(
+    *,
+    config_path: Path | None,
+    dry_run: bool,
+    prompt_path: Path = DEFAULT_PROMPT_PATH,
+    temperature: float = 0.2,
+) -> Target:
+    """Pick the feature under test: the built-in summarizer unless a config names another.
+
+    With no config file the behaviour is exactly what it was before targets
+    existed. With one, the `[target]` section decides, and for the built-in kind
+    the caller's `--prompt` and `--temperature` still win — varying the prompt is
+    the whole reason stage 01 has those flags.
+
+    Raises:
+        ConfigFileError: if the config file is missing or invalid.
+        TargetConfigError: if its `[target]` section does not describe a target.
+        ProviderConfigError: if a model provider is needed and cannot be built.
+    """
+    if config_path is None:
+        return BuiltinSummarizerTarget(
+            build_provider(dry_run=dry_run), prompt_path=prompt_path, temperature=temperature
+        )
+
+    section = load_config(config_path).target
+    if section.get("kind") == DEFAULT_TARGET_KIND:
+        section = {**section, "prompt_path": str(prompt_path), "temperature": temperature}
+    return load_target(section, provider_factory=lambda: build_provider(dry_run=dry_run))
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Returns the process exit code."""
     args = build_parser().parse_args(argv)
 
     try:
-        provider = build_provider(dry_run=args.dry_run)
+        target = build_target(
+            config_path=args.config,
+            dry_run=args.dry_run,
+            prompt_path=args.prompt,
+            temperature=args.temperature,
+        )
         out_dir = Path(args.runs_dir) / run_directory_name()
         summary = run_goldens(
             goldens_path=args.goldens,
             out_dir=out_dir,
             samples=args.samples,
-            provider=provider,
+            target=target,
             prompt_path=args.prompt,
             temperature=args.temperature,
             min_interval_ms=args.min_interval_ms,
         )
-    except (GoldenDatasetError, ProviderConfigError, FileNotFoundError, ValueError) as exc:
+    except (
+        ConfigFileError,
+        GoldenDatasetError,
+        ProviderConfigError,
+        TargetConfigError,
+        FileNotFoundError,
+        ValueError,
+    ) as exc:
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
 

@@ -34,11 +34,12 @@ from .runner import (
     DEFAULT_GOLDENS_PATH,
     DEFAULT_RUNS_DIR,
     RunSummary,
+    build_target,
     display_path,
     run_directory_name,
     run_goldens,
 )
-from .runner import build_provider as build_target_provider
+from .target.adapters.base import TargetConfigError
 from .target.summarizer import DEFAULT_PROMPT_PATH
 
 
@@ -79,6 +80,7 @@ def detect(
         GoldenDatasetError: if the dataset is missing or invalid.
         JudgeRunError: if the run directory stage 02 reads back is malformed.
         ProviderConfigError: if the provider cannot be built.
+        TargetConfigError: if the `[target]` section does not describe a target.
         ReportInputError: if the finished run cannot be rendered into a report.
         ValueError: if `samples` or `min_interval_ms` is out of range.
         FileNotFoundError: if a prompt file is missing.
@@ -91,7 +93,9 @@ def detect(
         goldens_path=goldens_path,
         out_dir=run_dir,
         samples=samples,
-        provider=build_target_provider(dry_run=dry_run),
+        target=build_target(
+            config_path=config_path, dry_run=dry_run, prompt_path=prompt_path
+        ),
         prompt_path=prompt_path,
         min_interval_ms=min_interval_ms,
     )
@@ -220,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
         GoldenDatasetError,
         JudgeRunError,
         ProviderConfigError,
+        TargetConfigError,
         ReportInputError,
         FileNotFoundError,
         ValueError,
