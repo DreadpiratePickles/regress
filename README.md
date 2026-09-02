@@ -1,6 +1,7 @@
 # Model Regression Detection
 
-> Status: design phase. Nothing runs yet.
+> Status: stage 01 built and running against a real model. Stages 02–04 are
+> designed but not implemented — see `CONTEXT.md`.
 
 A CI tool that answers one question every time a prompt or model changes:
 **did this change make the feature worse?** — and answers it before the change
@@ -33,11 +34,70 @@ reaches users.
 - `v2` — an adapter for an external open-source LLM app, proving the tool is
   target-agnostic.
 
+## Provider
+
+Model calls (the v1 target and the judge) go through a narrow provider adapter.
+The first adapter is Gemini, configured by `GEMINI_API_KEY` in `.env` (see
+`.env.example`). Nothing outside the adapter knows which provider is in use.
+
+## Setup
+
+Requires [uv](https://docs.astral.sh/uv/). The Python version is pinned in
+`.python-version`; uv installs it for you.
+
+```bash
+uv sync                                    # create the venv, install deps
+```
+
+Then create a `.env` file in the repository root with your Gemini key:
+
+```
+GEMINI_API_KEY=<your key>
+```
+
+`.env` is gitignored and must never be committed. Optionally set
+`TARGET_MODEL_ID` to override the default model.
+
+Verify the install, without touching the network or spending anything:
+
+```bash
+uv run pytest -q                                          # unit tests
+uv run ruff check .                                       # lint
+uv run python scripts/run_goldens.py --dry-run            # canned provider
+```
+
+Run the goldens against the real model:
+
+```bash
+uv run python scripts/run_goldens.py --goldens goldens/cases.yaml --samples 1
+```
+
+Outputs land in `runs/<UTC timestamp>/` (gitignored): `outputs.jsonl` for the
+next stage, `manifest.json` for provenance, and `review.md` for a human to grade
+by hand. Exit code is `0` if every call succeeded, `1` if any call failed, `2`
+on bad configuration.
+
 ## Layout
 
 ```
-goldens/     golden dataset (cases + criteria) — human-authored
-target/      the feature under test (v1: ticket summarizer)
+CONTEXT.md                     Layer 1 router: which stage owns which job
+stages/01_run/CONTEXT.md       stage contract for the golden runner
+goldens/                       golden dataset (cases + criteria) — human-authored
+scripts/run_goldens.py         stage 01 entry point
+src/regression_detect/
+  goldens.py                   dataset loader + validation
+  runner.py                    stage 01: run cases, write run artifacts
+  review.py                    renders review.md for the human grader
+  providers/                   the provider seam — the only vendor-aware code
+    base.py                    Provider protocol + typed errors
+    fake.py                    in-memory provider for dry runs and tests
+    gemini.py                  Gemini adapter: retries, timeout, error mapping
+  target/                      the feature under test (v1: ticket summarizer)
+    summarizer.py              input/output validation, prompt loading
+    config.py                  target model id — model names live only here
+    prompts/summarize_v1.md    the v1 system prompt
+tests/                         pytest suite; no test calls the network
+runs/                          per-run artifacts (gitignored)
 ```
 
 More directories appear as stages are built. Each stage has a `CONTEXT.md`
