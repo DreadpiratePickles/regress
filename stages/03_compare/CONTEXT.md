@@ -77,10 +77,10 @@ feature got worse" from "the tool could not run".
 
 ## Verify
 
-- `uv run pytest -q` — 364 tests across all three stages, all passing, none
+- `uv run pytest -q` — 451 tests across all four stages, all passing, none
   touching the network.
 - `uv run ruff check .` — clean at line-length 100.
-- `uv run pytest --cov=regression_detect --cov-report=term-missing -q` — 96%.
+- `uv run pytest --cov=regression_detect --cov-report=term-missing -q` — 97%.
 - `uv run python scripts/detect.py --baseline baselines/summarizer/baseline.json
   --dry-run` — runs all three stages offline with the canned providers, writes
   `comparison.json`, and exits with the verdict's code.

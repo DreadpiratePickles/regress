@@ -10,11 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from regression_detect import compare_run, pipeline
+from regression_detect import compare_run, pipeline, runner
 from regression_detect.baseline import Baseline, CriterionStat, build_baseline
 from regression_detect.compare import COMPARISON_FILENAME, Verdict
 from regression_detect.goldens import goldens_sha256, load_goldens
 from regression_detect.judge_runner import VERDICTS_FILENAME
+from regression_detect.report import REPORT_FILENAME
 from regression_detect.target.summarizer import DEFAULT_PROMPT_PATH
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -103,6 +104,28 @@ def test_dry_run_pipeline_runs_all_three_stages(tmp_path, capsys):
     assert str(run_dir.name) in printed
 
 
+def test_dry_run_pipeline_also_writes_the_pr_report(tmp_path):
+    baseline_path = write_baseline(tmp_path)
+    pipeline.main(detect_args(tmp_path, baseline_path, "--samples", "1"))
+
+    run_dir = sorted((tmp_path / "runs").iterdir())[0]
+    report = (run_dir / REPORT_FILENAME).read_text(encoding="utf-8")
+
+    assert "🟢 NO_REGRESSION" in report
+    assert run_dir.name in report
+
+
+def test_the_comparison_records_which_baseline_it_was_measured_against(tmp_path):
+    baseline_path = write_baseline(tmp_path)
+    pipeline.main(detect_args(tmp_path, baseline_path, "--samples", "1"))
+
+    run_dir = sorted((tmp_path / "runs").iterdir())[0]
+    payload = json.loads((run_dir / COMPARISON_FILENAME).read_text(encoding="utf-8"))
+
+    assert payload["baseline_source"]["run_ids"] == ["baseline-run"]
+    assert payload["baseline_source"]["created_at_utc"] == "2026-01-01T00:00:00Z"
+
+
 def test_dry_run_comparison_matches_every_criterion(tmp_path):
     baseline_path = write_baseline(tmp_path)
     pipeline.main(detect_args(tmp_path, baseline_path, "--samples", "1"))
@@ -167,6 +190,18 @@ def test_pipeline_reports_a_missing_goldens_file(tmp_path, capsys):
 
     assert pipeline.main(args) == 3
     assert "GoldenDatasetError" in capsys.readouterr().err
+
+
+def test_pacing_applies_to_the_target_calls_as_well_as_the_judge(tmp_path, monkeypatch):
+    """A per-minute quota is spent by stage 01 too, so both stages are paced."""
+    slept: list[float] = []
+    monkeypatch.setattr(runner.time, "sleep", slept.append)
+    baseline_path = write_baseline(tmp_path)
+
+    pipeline.main(detect_args(tmp_path, baseline_path, "--samples", "1",
+                              "--min-interval-ms", "20"))
+
+    assert len(slept) == 15 - 1 + CRITERIA_TOTAL - 1
 
 
 def test_detect_returns_the_run_directory_and_result(tmp_path):

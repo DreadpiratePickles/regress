@@ -1,7 +1,7 @@
 # Model Regression Detection
 
-> Status: stages 01, 02 and 03 built and running against a real model. Stage 04
-> is designed but not implemented — see `CONTEXT.md`.
+> Status: all four stages built and running against a real model — see
+> `CONTEXT.md`.
 
 A CI tool that answers one question every time a prompt or model changes:
 **did this change make the feature worse?** — and answers it before the change
@@ -143,6 +143,33 @@ uv run python scripts/compare.py --baseline baselines/summarizer/baseline.json \
   --candidate runs/<ts>
 ```
 
+### Report and alert
+
+`detect.py` writes `report.md` into the run directory itself — the Markdown a CI
+job posts as a pull-request comment: the verdict with a badge, the explanation,
+the two pass rates with their intervals, the criteria that fell (worst first,
+hard regressions marked), the criteria that improved, and a `<details>` block
+per regressed criterion holding the candidate output and the judge's reason. To
+render it again from a finished run, or somewhere else:
+
+```bash
+uv run python scripts/report.py --run runs/<UTC timestamp>
+```
+
+The Slack alert is a dry run by default: it prints the payload it *would* post
+and sends nothing. Sending needs `--send`, a `SLACK_WEBHOOK_URL` in the
+environment, and a `REGRESSION` verdict — `--always` overrides the last of
+those:
+
+```bash
+uv run python scripts/alert.py --run runs/<UTC timestamp>          # prints only
+uv run python scripts/alert.py --run runs/<UTC timestamp> --send   # posts
+```
+
+`.github/workflows/regression.yml` wires both into CI. A worked example of a
+real regression — the broken prompt, the report it produced, and the alert
+payload — is in [`docs/examples/`](docs/examples/).
+
 ### Calibration
 
 Nothing grades the judge, so calibrate it against a human. Tick the criteria in
@@ -167,19 +194,25 @@ regression.toml                thresholds a verdict rests on — no model ids he
 stages/01_run/CONTEXT.md       stage contract for the golden runner
 stages/02_judge/CONTEXT.md     stage contract for the judge
 stages/03_compare/CONTEXT.md   stage contract for the comparison
+stages/04_report/CONTEXT.md    stage contract for the report and the alert
+.github/workflows/regression.yml  how the stages run in CI, and what fails a PR
 docs/statistics.md             why stage 03 uses these tests, and their limits
+docs/examples/                 the worked example: a broken prompt and its report
 goldens/                       golden dataset (cases + criteria) — human-authored
 baselines/                     committed reference scores; see baselines/README.md
 scripts/run_goldens.py         stage 01 entry point
 scripts/judge_run.py           stage 02 entry point
 scripts/baseline.py            build and show a baseline
 scripts/compare.py             stage 03 entry point
-scripts/detect.py              all three stages in one command
+scripts/report.py              stage 04: render report.md from a compared run
+scripts/alert.py               stage 04: post the verdict to Slack (dry run by default)
+scripts/detect.py              all four stages in one command
 scripts/calibrate.py           judge calibration entry point
 src/regression_detect/
   goldens.py                   dataset loader + validation
   runner.py                    stage 01: run cases, write run artifacts
   review.py                    renders review.md for the human grader
+  pacing.py                    the shared call spacing both stages use for quotas
   judge_runner.py              stage 02: judge each criterion, write verdicts
   judge_inputs.py              reads a stage-01 run back in, validated
   scoring.py                   verdict records, pass-rate arithmetic, judged.md
@@ -188,7 +221,11 @@ src/regression_detect/
   compare.py                   stage 03: Fisher exact, Wilson, the decision rule
   comparison.py                the comparison record, its JSON, and explain()
   compare_run.py               stage 03 CLI: read, compare, write comparison.json
-  pipeline.py                  runs stages 01 → 02 → 03 in one process
+  report.py                    stage 04: render report.md — pure, no decisions
+  report_inputs.py             reads a compared run back in, validated
+  alert_run.py                 stage 04 CLI: the three gates before an alert is sent
+  alerts/slack.py              Block Kit payload, bounded body, typed send errors
+  pipeline.py                  runs stages 01 → 02 → 03 → 04 in one process
   config_file.py               reads and validates regression.toml
   calibration.py               human ticks vs judge verdicts — no model call
   providers/                   the provider seam — the only vendor-aware code

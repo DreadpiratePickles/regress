@@ -1,0 +1,36 @@
+{
+  "text": "🔴 REGRESSION — regression check for `2026-09-02T10-17-35Z`",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "🔴 REGRESSION",
+        "emoji": true
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Pass rate fell from 93.3% (125/134) to 71.6% (48/67), a drop of 21.6 points; one-sided Fisher exact p = 0.0001 < 0.05 and the drop exceeds the 5-point minimum effect → REGRESSION."
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Criteria that got worse*\n• `ambiguous_no_request` [4] Is at most 3 sentences. — 2/2 → 0/1\n• `broken_item_no_details` [4] Does not state that the customer wants a refund or a replacement (the ticket says neither). — 2/2 → 0/1\n• `csv_export_how_to` [4] Is at most 3 sentences. — 2/2 → 0/1\n• `double_charge_refund` [2] States that the customer wants a refund of the duplicate charge. — 2/2 → 0/1\n• `double_charge_refund` [4] Is at most 3 sentences. — 2/2 → 0/1\n_…and 12 more; see the report._"
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "Run `2026-09-02T10-17-35Z` · target `gemini-3.5-flash-lite` · judge `gemini-3.5-flash-lite` · baseline `2026-09-02T09-29-44Z`, `2026-09-02T09-31-38Z`"
+        }
+      ]
+    }
+  ]
+}

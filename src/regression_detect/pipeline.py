@@ -28,6 +28,8 @@ from .judge_inputs import JudgeRunError
 from .judge_runner import JudgeRunSummary, judge_run
 from .judge_runner import build_provider as build_judge_provider
 from .providers.base import ProviderConfigError
+from .report import write_report_for_run
+from .report_inputs import ReportInputError
 from .runner import (
     DEFAULT_GOLDENS_PATH,
     DEFAULT_RUNS_DIR,
@@ -49,6 +51,7 @@ class DetectOutcome:
     judge_summary: JudgeRunSummary
     comparison: ComparisonResult
     comparison_path: Path
+    report_path: Path
 
     @property
     def exit_code(self) -> int:
@@ -76,6 +79,7 @@ def detect(
         GoldenDatasetError: if the dataset is missing or invalid.
         JudgeRunError: if the run directory stage 02 reads back is malformed.
         ProviderConfigError: if the provider cannot be built.
+        ReportInputError: if the finished run cannot be rendered into a report.
         ValueError: if `samples` or `min_interval_ms` is out of range.
         FileNotFoundError: if a prompt file is missing.
     """
@@ -89,6 +93,7 @@ def detect(
         samples=samples,
         provider=build_target_provider(dry_run=dry_run),
         prompt_path=prompt_path,
+        min_interval_ms=min_interval_ms,
     )
     judge_summary = judge_run(
         run_dir=run_summary.out_dir,
@@ -108,12 +113,14 @@ def detect(
         max_judge_error_rate=settings.max_judge_error_rate,
     )
 
+    comparison_path = write_comparison(result, run_summary.out_dir, baseline=baseline)
     return DetectOutcome(
         run_dir=run_summary.out_dir,
         run_summary=run_summary,
         judge_summary=judge_summary,
         comparison=result,
-        comparison_path=write_comparison(result, run_summary.out_dir),
+        comparison_path=comparison_path,
+        report_path=write_report_for_run(run_summary.out_dir),
     )
 
 
@@ -160,8 +167,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help=(
-            "Minimum milliseconds between consecutive judge calls (default: 0). "
-            "Set this to 60000/RPM when the provider quota is per minute."
+            "Minimum milliseconds between consecutive model calls, in both stage 01 "
+            "and stage 02 (default: 0). Set this to 60000/RPM when the provider quota "
+            "is per minute."
         ),
     )
     parser.add_argument(
@@ -182,6 +190,7 @@ def _print_outcome(outcome: DetectOutcome) -> None:
         f"{judge.skipped_outputs} output(s) skipped"
     )
     print(f"  Stage 03: {display_path(outcome.comparison_path)}")
+    print(f"  Stage 04: {display_path(outcome.report_path)}")
     print()
     print(render_report(outcome.comparison))
 
@@ -211,6 +220,7 @@ def main(argv: list[str] | None = None) -> int:
         GoldenDatasetError,
         JudgeRunError,
         ProviderConfigError,
+        ReportInputError,
         FileNotFoundError,
         ValueError,
     ) as exc:

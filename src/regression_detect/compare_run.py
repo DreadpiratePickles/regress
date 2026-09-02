@@ -20,18 +20,28 @@ import json
 import sys
 from pathlib import Path
 
-from .baseline import BaselineInputError, build_baseline, read_baseline
+from .baseline import Baseline, BaselineInputError, build_baseline, read_baseline
 from .compare import COMPARISON_FILENAME, ComparisonResult, compare
 from .comparison import INPUT_ERROR_EXIT_CODE, percent
 from .config_file import DEFAULT_CONFIG_PATH, ConfigFileError, load_config
 from .runner import display_path
 
 
-def write_comparison(result: ComparisonResult, run_dir: Path) -> Path:
-    """Write `comparison.json` into the candidate's own run directory."""
+def write_comparison(result: ComparisonResult, run_dir: Path, *, baseline: Baseline) -> Path:
+    """Write `comparison.json` into the candidate's own run directory.
+
+    The baseline's identity is recorded alongside the numbers, so a later reader
+    — the stage 04 report, or a human — can say which "before" this verdict was
+    measured against without trusting that the baseline file still holds it.
+    """
+    payload = result.to_json()
+    payload["baseline_source"] = {
+        "created_at_utc": baseline.created_at_utc,
+        "run_ids": list(baseline.run_ids),
+    }
     destination = Path(run_dir) / COMPARISON_FILENAME
     destination.write_text(
-        json.dumps(result.to_json(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     return destination
 
@@ -124,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
         return INPUT_ERROR_EXIT_CODE
 
-    destination = write_comparison(result, args.candidate)
+    destination = write_comparison(result, args.candidate, baseline=baseline)
     print(render_report(result))
     print(f"\nWritten: {display_path(destination)}")
     return result.exit_code

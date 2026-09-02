@@ -1,0 +1,228 @@
+# Regression detection in CI.
+#
+# Nothing in this file names a model, a threshold or a key. Models are chosen by
+# `src/regression_detect/target/config.py` and `src/regression_detect/judge/config.py`
+# (overridable through the environment variables named in `regression.toml`);
+# the thresholds a verdict rests on live in `regression.toml`; the credentials
+# — `GEMINI_API_KEY`, and optionally `SLACK_WEBHOOK_URL` — are repository
+# secrets. Quotas are handled by `--min-interval-ms`, which paces both the
+# target calls and the judge calls to fit a per-minute limit.
+#
+# Two jobs, deliberately separate:
+#
+#   unit        every push to main and every pull request. Lint, tests, and one
+#               offline dry run. Needs no secret and spends nothing.
+#   regression  pull requests that touch what the goldens measure. Runs the real
+#               detector, comments the report on the PR, and fails the check
+#               only on a REGRESSION verdict.
+#
+# A missing `GEMINI_API_KEY` never fails a pull request: forks and first-time
+# contributors do not get the secret, and a check that goes red because of that
+# teaches people to ignore it.
+
+name: regression
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: lint, tests, offline dry run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Tests
+        run: uv run pytest -q
+
+      # The dry run uses the canned in-memory providers, so it must work with no
+      # key at all. Its fake verdicts may compare to anything; the only thing
+      # asserted here is that the tool ran — exit 3 means it could not.
+      - name: Offline dry run
+        env:
+          GEMINI_API_KEY: ""
+        run: |
+          set +e
+          uv run python scripts/detect.py --dry-run \
+            --baseline baselines/summarizer/baseline.json
+          code=$?
+          set -e
+          echo "detect.py --dry-run exited ${code}"
+          if [ "${code}" -eq 3 ]; then
+            echo "::error::The offline dry run could not run at all (exit 3)."
+            exit 1
+          fi
+
+  scope:
+    name: does this pull request touch the measured surface?
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # GitHub's own `paths:` filter is workflow-wide, and `unit` must run on
+      # every pull request, so the filter is computed here instead.
+      - id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")
+          echo "Changed files:"
+          echo "${changed}"
+          pattern='^(src/regression_detect/target/|src/regression_detect/judge/prompts/|baselines/|goldens/|regression\.toml$)'
+          if printf '%s\n' "${changed}" | grep -Eq "${pattern}"; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  regression:
+    name: live regression check
+    needs: scope
+    if: needs.scope.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A secret cannot be tested directly in an `if:`, so it is copied into an
+      # environment variable and only its presence is reported.
+      - id: secret
+        name: Is the provider key available?
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${GEMINI_API_KEY}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Say the live check was skipped
+        if: steps.secret.outputs.present != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          cat > skipped.md <<'BODY'
+          ## Regression check — skipped
+
+          The live regression check did not run: the `GEMINI_API_KEY` secret is not
+          available to this pull request. Forks do not receive repository secrets, so
+          this is expected and is not a failure — the unit tests and the offline dry
+          run still ran. A maintainer can run the check from a branch in this
+          repository.
+          BODY
+          gh pr comment "${PR}" --body-file skipped.md
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        if: steps.secret.outputs.present == 'true'
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        if: steps.secret.outputs.present == 'true'
+        run: uv sync --frozen
+
+      # No --samples: the [run] samples value in regression.toml is the default,
+      # so the sample count stays a reviewed number in a config file rather than
+      # a literal in a workflow. --min-interval-ms paces both stages under the
+      # provider's per-minute quota (60000 / RPM).
+      - id: detect
+        name: Run the detector
+        if: steps.secret.outputs.present == 'true'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set +e
+          uv run python scripts/detect.py \
+            --baseline baselines/summarizer/baseline.json \
+            --min-interval-ms 6500
+          code=$?
+          set -e
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+          run_dir=$(ls -d runs/*/ | sort | tail -1)
+          run_dir=${run_dir%/}
+          echo "run_dir=${run_dir}" >> "$GITHUB_OUTPUT"
+          echo "detect.py exited ${code}; run directory ${run_dir}"
+
+      - name: Upload the run directory
+        if: steps.secret.outputs.present == 'true' && steps.detect.outputs.run_dir != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: regression-run-${{ github.event.pull_request.number }}
+          path: ${{ steps.detect.outputs.run_dir }}
+          if-no-files-found: warn
+
+      - name: Comment the report on the pull request
+        if: steps.secret.outputs.present == 'true' && steps.detect.outputs.code != '3'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPORT: ${{ steps.detect.outputs.run_dir }}/report.md
+        run: |
+          set -euo pipefail
+          # Re-running a check should replace its comment, not stack another one.
+          # --edit-last fails when this job has never commented; then post a new one.
+          gh pr comment "${PR}" --body-file "${REPORT}" --edit-last \
+            || gh pr comment "${PR}" --body-file "${REPORT}"
+
+      # Optional. Without SLACK_WEBHOOK_URL nothing is sent; with it, alert.py
+      # still posts only for a REGRESSION verdict — the gate is in the tool, not
+      # in this file.
+      - name: Alert Slack
+        if: steps.secret.outputs.present == 'true' && steps.detect.outputs.run_dir != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          RUN_DIR: ${{ steps.detect.outputs.run_dir }}
+          REPORT_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "SLACK_WEBHOOK_URL is not set; no alert sent."
+            exit 0
+          fi
+          uv run python scripts/alert.py --run "${RUN_DIR}" --send --report-url "${REPORT_URL}"
+
+      # The verdict decides the check, and only a proven regression fails it.
+      # INCONCLUSIVE (2) passes with its yellow comment: "we could not tell" is
+      # not "the feature got worse". 3 is a configuration fault, and fails.
+      - name: Apply the verdict
+        if: steps.secret.outputs.present == 'true'
+        env:
+          CODE: ${{ steps.detect.outputs.code }}
+        run: |
+          set -euo pipefail
+          case "${CODE}" in
+            0) echo "NO_REGRESSION." ;;
+            1) echo "::error::REGRESSION — the drop survived the noise test."; exit 1 ;;
+            2) echo "::warning::INCONCLUSIVE — not enough judged evidence to say." ;;
+            3) echo "::error::The detector could not run (bad baseline, run or config)."
+               exit 1 ;;
+            *) echo "::error::Unexpected exit code ${CODE} from detect.py."; exit 1 ;;
+          esac

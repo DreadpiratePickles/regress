@@ -308,3 +308,109 @@ def test_cli_exits_two_when_the_provider_cannot_be_built(
     )
 
     assert exit_code == 2
+
+
+# --- pacing ------------------------------------------------------------------
+
+
+def test_by_default_the_runner_does_not_pace_itself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slept: list[float] = []
+    monkeypatch.setattr(runner.time, "sleep", slept.append)
+
+    run_goldens(
+        goldens_path=REAL_GOLDENS,
+        out_dir=tmp_path / "run",
+        samples=1,
+        provider=FakeProvider("A short summary."),
+    )
+
+    assert slept == []
+
+
+def test_pacing_waits_between_consecutive_target_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slept: list[float] = []
+    monkeypatch.setattr(runner.time, "sleep", slept.append)
+
+    run_goldens(
+        goldens_path=REAL_GOLDENS,
+        out_dir=tmp_path / "run",
+        samples=1,
+        provider=FakeProvider("A short summary."),
+        min_interval_ms=250,
+    )
+
+    assert len(slept) == CASE_COUNT - 1
+    assert all(0 < wait <= 0.25 for wait in slept)
+
+
+def test_pacing_counts_every_sample_not_every_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slept: list[float] = []
+    monkeypatch.setattr(runner.time, "sleep", slept.append)
+
+    run_goldens(
+        goldens_path=REAL_GOLDENS,
+        out_dir=tmp_path / "run",
+        samples=2,
+        provider=FakeProvider("A short summary."),
+        min_interval_ms=100,
+    )
+
+    assert len(slept) == CASE_COUNT * 2 - 1
+
+
+@pytest.mark.parametrize("interval", [-1, 6.5, "6500", True])
+def test_an_interval_that_is_not_a_whole_non_negative_number_is_rejected(
+    tmp_path: Path, interval
+) -> None:
+    with pytest.raises(ValueError):
+        run_goldens(
+            goldens_path=REAL_GOLDENS,
+            out_dir=tmp_path / "run",
+            samples=1,
+            provider=FakeProvider("A short summary."),
+            min_interval_ms=interval,
+        )
+
+
+def test_cli_rejects_a_negative_interval(tmp_path: Path) -> None:
+    exit_code = main(
+        [
+            "--goldens",
+            str(REAL_GOLDENS),
+            "--runs-dir",
+            str(tmp_path / "runs"),
+            "--dry-run",
+            "--min-interval-ms",
+            "-1",
+        ]
+    )
+
+    assert exit_code == 2
+
+
+def test_cli_passes_the_interval_through_to_the_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slept: list[float] = []
+    monkeypatch.setattr(runner.time, "sleep", slept.append)
+
+    exit_code = main(
+        [
+            "--goldens",
+            str(REAL_GOLDENS),
+            "--runs-dir",
+            str(tmp_path / "runs"),
+            "--dry-run",
+            "--min-interval-ms",
+            "50",
+        ]
+    )
+
+    assert exit_code == 0
+    assert len(slept) == CASE_COUNT - 1

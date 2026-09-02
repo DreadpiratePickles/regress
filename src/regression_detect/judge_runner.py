@@ -35,6 +35,7 @@ from .judge_inputs import (
     read_output_rows,
     read_stage_01_manifest,
 )
+from .pacing import pace, validate_interval
 from .providers.base import Provider, ProviderConfigError, ProviderError
 from .providers.fake import FakeProvider
 from .runner import OUTPUTS_FILENAME, display_path, utc_stamp
@@ -135,27 +136,6 @@ def _judge_one(
     )
 
 
-def _pace(previous_start: float | None, min_interval_ms: int) -> float:
-    """Sleep so consecutive judge calls start at least `min_interval_ms` apart.
-
-    Stage 02 issues one call per criterion, several times stage 01's volume, and
-    a provider quota is usually per minute. Bounded retries alone cannot ride
-    out a window that long, so the burst is spread deterministically here rather
-    than half the criteria being recorded as rate-limit errors.
-
-    Returns:
-        The monotonic timestamp at which the next call may start.
-    """
-    now = time.monotonic()
-    if previous_start is None or min_interval_ms <= 0:
-        return now
-    wait = (min_interval_ms / 1000) - (now - previous_start)
-    if wait <= 0:
-        return now
-    time.sleep(wait)
-    return time.monotonic()
-
-
 def judge_run(
     *,
     run_dir: Path,
@@ -179,10 +159,7 @@ def judge_run(
     """
     if not isinstance(judge_samples, int) or judge_samples < 1:
         raise ValueError(f"judge_samples must be a positive integer, got {judge_samples!r}")
-    if not isinstance(min_interval_ms, int) or min_interval_ms < 0:
-        raise ValueError(
-            f"min_interval_ms must be a non-negative integer, got {min_interval_ms!r}"
-        )
+    validate_interval(min_interval_ms)
 
     run_dir, goldens_path, prompt_path = Path(run_dir), Path(goldens_path), Path(prompt_path)
     stage_01_manifest = read_stage_01_manifest(run_dir)
@@ -213,7 +190,7 @@ def judge_run(
         case = by_id[output.case_id]
         for criterion_index in range(len(case.criteria)):
             for judge_sample_index in range(judge_samples):
-                previous_start = _pace(previous_start, min_interval_ms)
+                previous_start = pace(previous_start, min_interval_ms)
                 verdicts.append(
                     _judge_one(
                         case=case,

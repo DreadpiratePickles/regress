@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from .goldens import GoldenDatasetError, goldens_sha256, load_goldens
+from .pacing import pace, validate_interval
 from .providers.base import Provider, ProviderConfigError, ProviderError
 from .providers.fake import FakeProvider
 from .review import SampleResult, render_review
@@ -115,16 +116,19 @@ def run_goldens(
     provider: Provider,
     prompt_path: Path = DEFAULT_PROMPT_PATH,
     temperature: float = 0.2,
+    min_interval_ms: int = 0,
 ) -> RunSummary:
     """Run every golden case `samples` times and write the stage-01 outputs.
 
     Raises:
-        ValueError: if `samples` is not a positive integer.
+        ValueError: if `samples` is not a positive integer, or `min_interval_ms`
+            is negative.
         GoldenDatasetError: if the dataset is missing or invalid.
         FileNotFoundError: if the prompt file is missing.
     """
     if not isinstance(samples, int) or samples < 1:
         raise ValueError(f"samples must be a positive integer, got {samples!r}")
+    validate_interval(min_interval_ms)
 
     goldens_path = Path(goldens_path)
     prompt_path = Path(prompt_path)
@@ -133,8 +137,10 @@ def run_goldens(
     started_at = utc_stamp()
 
     results: list[SampleResult] = []
+    previous_start: float | None = None
     for case in cases:
         for sample_index in range(samples):
+            previous_start = pace(previous_start, min_interval_ms)
             results.append(
                 _run_one_sample(
                     ticket=case.input,
@@ -207,6 +213,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--temperature", type=float, default=0.2, help="Sampling temperature (default: 0.2)."
     )
     parser.add_argument(
+        "--min-interval-ms",
+        type=int,
+        default=0,
+        help=(
+            "Minimum milliseconds between consecutive target calls (default: 0). "
+            "Set this to 60000/RPM when the provider quota is per minute."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Use a canned in-memory provider instead of calling a model. No API key needed.",
@@ -236,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
             provider=provider,
             prompt_path=args.prompt,
             temperature=args.temperature,
+            min_interval_ms=args.min_interval_ms,
         )
     except (GoldenDatasetError, ProviderConfigError, FileNotFoundError, ValueError) as exc:
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)

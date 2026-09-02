@@ -53,7 +53,7 @@ Steps 1–4 and 7–10 are deterministic code. Step 6 is the only model call.
 
 ## Verify
 
-- `uv run pytest -q` — 364 tests across all three stages, all passing, none
+- `uv run pytest -q` — 451 tests across all four stages, all passing, none
   touching the network.
 - `uv run ruff check .` — clean at line-length 100.
 - `uv run python scripts/run_goldens.py --dry-run` — exits 0 and writes all

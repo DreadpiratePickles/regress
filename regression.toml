@@ -9,6 +9,12 @@
 # `src/regression_detect/target/config.py` and `src/regression_detect/judge/config.py`
 # and nowhere else; this file only names the environment variables that override
 # them, so a CI job can be told which knob to set without learning a model name.
+#
+# The Slack alert is configured the same way, by variable name only. Set
+# SLACK_WEBHOOK_URL in the environment — a repository secret in CI — for
+# `scripts/alert.py --send` to have anywhere to post. Its value is a credential
+# and must never appear in this file, in a log line, or in an error message.
+# Without it the alert stays a dry run, which is the default in any case.
 
 [compare]
 # Significance level for the one-sided Fisher exact test. A drop must be this

@@ -14,10 +14,11 @@ baseline, report the verdict. Each stage is one job with one output.
 | `01_run` | Run every golden case through the target feature and record raw outputs | `stages/01_run/CONTEXT.md`, `src/regression_detect/runner.py`, `scripts/run_goldens.py` | Yes |
 | `02_judge` | Grade each recorded output against its criteria with an LLM judge, emitting validated structured scores | `stages/02_judge/CONTEXT.md`, `src/regression_detect/judge_runner.py`, `src/regression_detect/judge/`, `scripts/judge_run.py` | Yes |
 | `03_compare` | Compare this run's scores against the committed baseline; decide statistically whether a drop exceeds run-to-run noise | `stages/03_compare/CONTEXT.md`, `src/regression_detect/{baseline,compare,comparison,pipeline}.py`, `scripts/{baseline,compare,detect}.py` | Yes |
-| `04_report` | Turn the comparison into a human verdict: PR comment, check status, alert | `stages/04_report/` | No |
+| `04_report` | Turn the comparison into a human verdict: PR comment, check status, alert | `stages/04_report/CONTEXT.md`, `src/regression_detect/{report,report_inputs,alert_run}.py`, `src/regression_detect/alerts/`, `scripts/{report,alert}.py`, `.github/workflows/regression.yml` | Yes |
 
-Stages 01–03 are implemented. Stage 04 has no directory yet; it arrives with its
-own `CONTEXT.md` contract before any of its code is written.
+All four stages are implemented. Stage 04 is the only one that writes anything
+outside the repository — a pull-request comment and, if a webhook is configured,
+a Slack message — and both of those are gated; its `CONTEXT.md` says how.
 
 Judge calibration (`src/regression_detect/calibration.py`,
 `scripts/calibrate.py`) is not a pipeline stage. It is the check on stage 02:
@@ -41,6 +42,8 @@ verdicts. Run it before trusting a judge score, never as part of a CI run.
 | `baselines/README.md` | 3 | The rules a baseline must satisfy — authoritative before any re-baselining |
 | `baselines/<target>/baseline.json` | 3 | The reference scores every pull request is measured against. Committed to git, changed only by a reviewed commit |
 | `docs/statistics.md` | 3 | Why stage 03 uses the tests it uses, and what they cannot tell you |
+| `docs/examples/` | 3 | The worked example: a deliberately broken prompt, and the report, comparison and alert payload it actually produced |
+| `.github/workflows/regression.yml` | 3 | How the four stages run in CI, and what does and does not fail a pull request |
 | `runs/<UTC timestamp>/` | 4 | Per-run artifacts. Gitignored, never an input to a later edit of the factory |
 
 ## Rules that hold across every stage
