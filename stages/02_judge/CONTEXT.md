@@ -76,7 +76,7 @@ verdicts, and counts agreement, false passes and false fails. It calls no model.
 
 ## Verify
 
-- `uv run pytest -q` — 451 tests, all passing, none touching the network.
+- `uv run pytest -q` — 565 tests, all passing, none touching the network.
 - `uv run ruff check .` — clean at line-length 100.
 - `uv run pytest --cov=regression_detect --cov-report=term-missing -q` — 97%.
 - `uv run python scripts/run_goldens.py --dry-run` then

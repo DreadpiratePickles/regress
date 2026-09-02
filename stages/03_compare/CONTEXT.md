@@ -68,7 +68,7 @@ sentence — that is the property that makes the verdict reviewable at all.
 | Path | Schema or format | Consumer |
 |---|---|---|
 | `baselines/<target>/baseline.json` | JSON: `schema_version` (1), `created_at_utc`, `run_ids[]`, `goldens_sha256`, `prompt_sha256`, `target_model_id`, `judge_prompt_sha256`, `judge_model_id`, `totals.{n,passes,judge_errors}`, `criteria[].{case_id,criterion_index,criterion,n,passes,judge_errors}` | Stage 03 on every later run; committed to git |
-| `runs/<ts>/comparison.json` | JSON: `schema_version` (1), `verdict`, `explanation`, `overall.{baseline,candidate}.{passes,n,rate,wilson_95}` and `overall.difference`, `p_value`, `thresholds.{alpha,min_effect,min_samples,max_judge_error_rate}`, `candidate_judge_errors.{errors,rows,rate}`, `cases[]`, `criteria[]` (with `hard_regression`), `unmatched[]` | Stage 04 (report), and any human auditing the verdict |
+| `runs/<ts>/comparison.json` | JSON: `schema_version` (1), `verdict`, `explanation`, `overall.{baseline,candidate}.{passes,n,rate,wilson_95}` and `overall.difference`, `p_value`, `thresholds.{alpha,min_effect,min_samples,max_judge_error_rate}`, `candidate_judge_errors.{errors,rows,rate}`, `cases[]`, `criteria[]` (with `hard_regression`), `unmatched[]`, `baseline_source.{created_at_utc,run_ids}` (which "before" the verdict was measured against) | Stage 04 (report), and any human auditing the verdict |
 | Terminal report | The explanation, both rates with their intervals, the p-value, the criteria that fell (`!` marks a hard regression), and the unmatched list | A human on the pull request |
 | Process exit code | `0` NO_REGRESSION · `1` REGRESSION · `2` INCONCLUSIVE · `3` bad baseline, run directory or config | CI |
 
@@ -77,7 +77,7 @@ feature got worse" from "the tool could not run".
 
 ## Verify
 
-- `uv run pytest -q` — 451 tests across all four stages, all passing, none
+- `uv run pytest -q` — 565 tests across all four stages, all passing, none
   touching the network.
 - `uv run ruff check .` — clean at line-length 100.
 - `uv run pytest --cov=regression_detect --cov-report=term-missing -q` — 97%.

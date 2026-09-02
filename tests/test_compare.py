@@ -572,6 +572,42 @@ def test_explain_names_the_judge_error_ceiling_when_inconclusive():
     assert text.rstrip().endswith("INCONCLUSIVE.")
 
 
+def test_explain_says_nothing_matched_only_when_nothing_matched():
+    baseline = make_baseline([stat("only_baseline", 0, 1, 1)])
+    candidate = make_baseline([stat("only_candidate", 0, 0, 1)])
+
+    text = compare(baseline, candidate, alpha=0.05, min_effect=0.05).explain()
+
+    assert "no criterion matched" in text
+    assert "INCONCLUSIVE." in text
+
+
+def test_explain_distinguishes_matched_but_wholly_unjudged_criteria():
+    """Criteria matched and were judged zero times: the judge failed, not the match."""
+    baseline = make_baseline([stat("c", index, 0, 0) for index in range(3)])
+    candidate = make_baseline([stat("c", index, 0, 0) for index in range(3)])
+
+    result = compare(baseline, candidate, alpha=0.05, min_effect=0.05)
+    text = result.explain()
+
+    assert len(result.criteria) == 3
+    assert (result.baseline_n, result.candidate_n) == (0, 0)
+    assert result.verdict is Verdict.INCONCLUSIVE
+    assert "no criterion matched" not in text
+    assert "3 criteria matched" in text
+    assert "judge call" in text
+    assert text.rstrip().endswith("INCONCLUSIVE.")
+
+
+def test_explain_names_the_side_that_judged_nothing():
+    baseline = make_baseline([stat("c", index, 1, 1) for index in range(3)])
+    candidate = make_baseline([stat("c", index, 0, 0) for index in range(3)])
+
+    text = compare(baseline, candidate, alpha=0.05, min_effect=0.05).explain()
+
+    assert "the candidate judged none of them" in text
+
+
 def test_explain_mentions_unmatched_criteria():
     baseline = make_baseline([*spread(40, 40), stat("removed", 0, 1, 1)])
     candidate = make_baseline([*spread(40, 40), stat("added", 0, 1, 1)])

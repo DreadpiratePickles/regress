@@ -17,6 +17,12 @@ unchanged, because none of it ever knew what a summarizer was.
 
 ## The three kinds
 
+Every `[target]` block below is a fragment, not a config file on its own:
+`load_config` also requires `[compare]`, `[run]` and `[models]`. The complete,
+loadable example is
+[`examples/external_target/regression.external.toml`](../examples/external_target/regression.external.toml)
+— copy it and replace its `[target]` section with one of these.
+
 ### `builtin` — the packaged summarizer
 
 The default, and what a config with no `[target]` section means.
@@ -61,6 +67,11 @@ The contract with your app:
 
 A failure is a recorded sample with an `error_type`, not a crashed run — the
 same partial-failure behaviour stage 01 has always had.
+
+`--dry-run` never starts your program. For any non-builtin kind a dry run
+substitutes a canned in-memory target, so it costs nothing and touches nothing,
+and the run records `target_id = "fake:dry-run"` so its numbers can never be
+mistaken for a measurement of your feature.
 
 `examples/external_target/ticket_summarizer_app.py` is a worked example: a
 standalone script with its own prompt, its own model id and its own error

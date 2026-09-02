@@ -302,10 +302,28 @@ def _regression_reasons(result: ComparisonResult) -> str:
     return " and ".join(reasons)
 
 
+def _unjudged_side(result: ComparisonResult) -> str:
+    """Which side contributed no judged observation at all."""
+    if result.baseline_n == 0 and result.candidate_n == 0:
+        return "neither side judged any of them"
+    if result.baseline_n == 0:
+        return "the baseline judged none of them"
+    return "the candidate judged none of them"
+
+
 def _inconclusive_reasons(result: ComparisonResult) -> str:
     reasons = []
-    if result.baseline_n == 0 or result.candidate_n == 0:
+    matched = len(result.criteria)
+    if not result.criteria:
         reasons.append("no criterion matched between the baseline and the candidate")
+    elif result.baseline_n == 0 or result.candidate_n == 0:
+        # Criteria did match; they simply carry no verdict. Saying "nothing
+        # matched" here would send a reader to the goldens diff to look for a
+        # rename that never happened, when the judge is what failed.
+        reasons.append(
+            f"{matched} {_criteria_word(matched)} matched but {_unjudged_side(result)}: "
+            "every judge call for those rows failed or was skipped"
+        )
     elif result.candidate_n < result.min_samples:
         reasons.append(
             f"the candidate judged only {result.candidate_n} criteria, below the "

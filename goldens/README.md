@@ -16,8 +16,8 @@ in the judge's scores.
 - **Adversarial cases earn their keep.** Empty input, huge input, two issues in
   one ticket, a ticket that tries to instruct the model — these catch the
   regressions that "happy path" cases never will.
-- **Small and sharp beats big.** 20–30 cases that each catch something is
-  better than 200 that overlap.
+- **Small and sharp beats big.** A sharp set of 15–30 cases that each catch
+  something is better than 200 that overlap. This repo ships 15.
 
 ## Criteria: good vs bad
 

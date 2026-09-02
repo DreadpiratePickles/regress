@@ -33,8 +33,12 @@ difference is.
 
 ## 2. Fisher's exact test: how surprising is this drop?
 
-The comparison is a two-by-two table. For a real example from this repo's own
-worked case:
+The comparison is a two-by-two table. The numbers below are **illustrative** —
+invented to keep the arithmetic in this section easy to follow by hand, with 67
+criteria on each side. They are not a run of this repository. The real worked
+case is in [`docs/examples/regressed_comparison.json`](examples/regressed_comparison.json):
+a two-run baseline of 125/134 against a candidate of 48/67, p ≈ 6.0e-05, verdict
+`REGRESSION`.
 
 |            | passed | failed | total |
 |------------|-------:|-------:|------:|
@@ -56,7 +60,8 @@ replacement. So
 
 $$P(X = x) = \frac{\binom{120}{x}\binom{14}{67-x}}{\binom{134}{67}}$$
 
-and the p-value is the lower tail, $P(X \le 55) = 0.0044$.
+and for the illustrative table above the p-value is the lower tail,
+$P(X \le 55) = 0.0044$.
 
 Read that as: **if nothing had changed, a candidate row this bad would come up
 about 4 times in 1000.** That is the number `alpha` (default 0.05) is compared
@@ -116,9 +121,9 @@ actually consistent with, rather than assuming the observed rate is the truth:
 
 $$\frac{\hat{p} + \frac{z^2}{2n} \pm z\sqrt{\frac{\hat{p}(1-\hat{p})}{n} + \frac{z^2}{4n^2}}}{1 + \frac{z^2}{n}}$$
 
-For 65/67 that gives roughly **89.8% – 99.2%**; for 55/67, **71.3% – 89.4%**.
-Those two intervals barely overlap, which is a second, visual way of seeing what
-the p-value already said.
+For the illustrative 65/67 that gives roughly **89.8% – 99.2%**; for 55/67,
+**71.3% – 89.4%**. Those two intervals barely overlap, which is a second, visual
+way of seeing what the p-value already said.
 
 The interval is reported, never decided on. Overlapping intervals are not the same
 question as a significance test, and treating them as one is a common way to miss

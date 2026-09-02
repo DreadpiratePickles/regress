@@ -36,7 +36,10 @@ Steps 1–5 and 8–11 are deterministic code. Step 7 is the only call out.
    `command` (argv list, `shell=False`, env allowlist) or `http`. An unknown
    kind, a missing required key, or a key that does not belong to the kind is a
    `TargetConfigError` here, before anything is spent. A missing API key fails
-   here too and never reaches step 7.
+   here too and never reaches step 7. Under `--dry-run` a non-builtin kind is
+   never built: `FakeTarget` is substituted, so no subprocess is spawned and no
+   endpoint is called, and the run records `target_id = "fake:dry-run"` rather
+   than impersonating the configured feature.
 3. Load and validate the golden dataset: list shape, required keys, snake_case
    ids, unique ids, non-empty criteria. Any violation aborts before any spend.
 4. Read `target.provenance()` and derive the run's identity: `prompt_sha256` and
@@ -70,7 +73,7 @@ Steps 1–5 and 8–11 are deterministic code. Step 7 is the only call out.
 
 ## Verify
 
-- `uv run pytest -q` — 560 tests across all four stages, all passing, none
+- `uv run pytest -q` — 565 tests across all four stages, all passing, none
   touching the network.
 - `uv run ruff check .` — clean at line-length 100.
 - `uv run python scripts/run_goldens.py --dry-run` — exits 0 and writes all

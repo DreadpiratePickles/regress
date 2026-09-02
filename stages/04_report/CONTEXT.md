@@ -72,7 +72,7 @@ a shared document and a developer's home directory is not part of the evidence.
 
 ## Verify
 
-- `uv run pytest -q` — 451 tests across all four stages, all passing, none
+- `uv run pytest -q` — 565 tests across all four stages, all passing, none
   touching the network and none sending a message.
 - `uv run ruff check .` — clean at line-length 100.
 - `uv run pytest --cov=regression_detect --cov-report=term-missing -q` — 97%.

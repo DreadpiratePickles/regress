@@ -26,6 +26,7 @@ from .review import SampleResult, render_review
 from .target.adapters.base import Target, TargetConfigError, TargetError, provenance_sha256
 from .target.adapters.builtin import BuiltinSummarizerTarget
 from .target.adapters.factory import load_target
+from .target.adapters.fake import FakeTarget
 from .target.config import target_model_id
 from .target.summarizer import DEFAULT_PROMPT_PATH, SummarizerError
 
@@ -253,7 +254,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Use a canned in-memory provider instead of calling a model. No API key needed.",
+        help=(
+            "Call nothing: a canned in-memory provider for the built-in target, and a "
+            "canned in-memory target for any other kind the config names. No API key, "
+            "no subprocess and no request, so no run reaches your app."
+        ),
     )
     return parser
 
@@ -280,6 +285,14 @@ def build_target(
     the caller's `--prompt` and `--temperature` still win — varying the prompt is
     the whole reason stage 01 has those flags.
 
+    A dry run is the exception, and it is not a small one. `--dry-run` promises
+    no key, no network and no cost, and that promise cannot depend on what the
+    config happens to name: a `command` target would spawn somebody's app and an
+    `http` target would POST to somebody's endpoint. So for any non-builtin kind
+    a dry run substitutes `FakeTarget` and never builds the configured adapter.
+    The built-in kind keeps the behaviour it always had — the packaged summarizer
+    on a canned provider — because that path already calls nothing.
+
     Raises:
         ConfigFileError: if the config file is missing or invalid.
         TargetConfigError: if its `[target]` section does not describe a target.
@@ -293,6 +306,8 @@ def build_target(
     section = load_config(config_path).target
     if section.get("kind") == DEFAULT_TARGET_KIND:
         section = {**section, "prompt_path": str(prompt_path), "temperature": temperature}
+    elif dry_run:
+        return FakeTarget(DRY_RUN_SUMMARY)
     return load_target(section, provider_factory=lambda: build_provider(dry_run=dry_run))
 
 

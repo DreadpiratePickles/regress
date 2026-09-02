@@ -8,17 +8,22 @@
 # secrets. Quotas are handled by `--min-interval-ms`, which paces both the
 # target calls and the judge calls to fit a per-minute limit.
 #
-# Two jobs, deliberately separate:
+# Three jobs, deliberately separate:
 #
 #   unit        every push to main and every pull request. Lint, tests, and one
 #               offline dry run. Needs no secret and spends nothing.
+#   scope       pull requests only. Decides from the diff whether the pull
+#               request touches the surface the goldens measure.
 #   regression  pull requests that touch what the goldens measure. Runs the real
 #               detector, comments the report on the PR, and fails the check
 #               only on a REGRESSION verdict.
 #
 # A missing `GEMINI_API_KEY` never fails a pull request: forks and first-time
 # contributors do not get the secret, and a check that goes red because of that
-# teaches people to ignore it.
+# teaches people to ignore it. Commenting is best-effort for the same reason —
+# `GITHUB_TOKEN` is read-only on a fork's pull request, so `gh pr comment` gets
+# a 403 there. Every comment step therefore carries `continue-on-error: true`.
+# Only the verdict fails this workflow.
 
 name: regression
 
@@ -122,8 +127,12 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Best-effort: a fork's GITHUB_TOKEN is read-only, so this 403s there. The
+      # comment is a courtesy; failing the check over it would punish exactly the
+      # contributors it is meant to reassure.
       - name: Say the live check was skipped
         if: steps.secret.outputs.present != 'true'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -166,7 +175,10 @@ jobs:
           code=$?
           set -e
           echo "code=${code}" >> "$GITHUB_OUTPUT"
-          run_dir=$(ls -d runs/*/ | sort | tail -1)
+          # `|| true` and the discarded stderr: on exit 3 the detector stops
+          # before any run directory exists, and `set -e` would kill this step
+          # before the verdict below could print the ::error:: that explains it.
+          run_dir=$(ls -d runs/*/ 2>/dev/null | sort | tail -1 || true)
           run_dir=${run_dir%/}
           echo "run_dir=${run_dir}" >> "$GITHUB_OUTPUT"
           echo "detect.py exited ${code}; run directory ${run_dir}"
@@ -179,8 +191,15 @@ jobs:
           path: ${{ steps.detect.outputs.run_dir }}
           if-no-files-found: warn
 
+      # Best-effort, like the skipped-check comment above: a read-only token on a
+      # fork's pull request cannot comment, and that must not turn a green run
+      # red. `run_dir` is guarded too — there is no report to post without one.
       - name: Comment the report on the pull request
-        if: steps.secret.outputs.present == 'true' && steps.detect.outputs.code != '3'
+        if: >-
+          steps.secret.outputs.present == 'true'
+          && steps.detect.outputs.code != '3'
+          && steps.detect.outputs.run_dir != ''
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}

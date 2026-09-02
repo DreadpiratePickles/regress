@@ -9,6 +9,7 @@ What matters here is that the runner calls `target.run(case.input)`, records
 """
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -18,10 +19,14 @@ from regression_detect.providers.fake import FakeProvider
 from regression_detect.runner import build_target, main, run_goldens
 from regression_detect.target.adapters.base import TargetExecutionError
 from regression_detect.target.adapters.builtin import BuiltinSummarizerTarget
+from regression_detect.target.adapters.fake import FAKE_TARGET_ID, FakeTarget
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REAL_GOLDENS = REPO_ROOT / "goldens" / "cases.yaml"
 REAL_CONFIG = REPO_ROOT / "regression.toml"
+EXTERNAL_EXAMPLE_CONFIG = (
+    REPO_ROOT / "examples" / "external_target" / "regression.external.toml"
+)
 FIXTURE_APP = Path(__file__).resolve().parent / "fixtures" / "fake_target_app.py"
 CASE_COUNT = 15
 
@@ -218,6 +223,8 @@ def test_a_config_whose_target_section_is_broken_exits_two(tmp_path: Path) -> No
         EXTERNAL_CONFIG.format(argv='"python app.py"'), encoding="utf-8"
     )
 
+    # Not a dry run on purpose: a dry run never builds the configured target, so
+    # the section's own errors are only reachable on a real run.
     exit_code = main(
         [
             "--goldens",
@@ -226,8 +233,54 @@ def test_a_config_whose_target_section_is_broken_exits_two(tmp_path: Path) -> No
             str(config),
             "--runs-dir",
             str(tmp_path / "runs"),
-            "--dry-run",
         ]
     )
 
     assert exit_code == 2
+
+
+# --- a dry run calls nothing, whatever the config names ---------------------
+
+
+def test_dry_run_returns_the_canned_target_for_a_command_config(tmp_path: Path) -> None:
+    config = tmp_path / "regression.external.toml"
+    config.write_text(
+        EXTERNAL_CONFIG.format(argv=json.dumps([sys.executable, str(FIXTURE_APP)])),
+        encoding="utf-8",
+    )
+
+    target = build_target(config_path=config, dry_run=True)
+
+    assert isinstance(target, FakeTarget)
+    assert target.target_id == FAKE_TARGET_ID
+
+
+def test_dry_run_through_the_external_example_spawns_no_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("a dry run must never spawn a subprocess")
+
+    monkeypatch.setattr(subprocess, "run", refuse)
+    runs_dir = tmp_path / "runs"
+
+    exit_code = main(
+        [
+            "--goldens",
+            str(REAL_GOLDENS),
+            "--config",
+            str(EXTERNAL_EXAMPLE_CONFIG),
+            "--runs-dir",
+            str(runs_dir),
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+    manifest = read_manifest(next(iter(runs_dir.iterdir())))
+    assert manifest["target_id"] == FAKE_TARGET_ID
+    assert manifest["model_id"] == "dry-run-fake"
+    assert manifest["target"]["kind"] == "fake"
+    rows = read_jsonl(next(iter(runs_dir.iterdir())) / "outputs.jsonl")
+    assert len(rows) == CASE_COUNT
+    assert all(row["error"] is None for row in rows)

@@ -179,7 +179,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Use canned in-memory providers instead of calling a model. No API key needed.",
+        help=(
+            "Call nothing: canned in-memory providers, and a canned in-memory target "
+            "for any non-builtin kind the config names. No API key, no subprocess and "
+            "no request, so no run reaches your app."
+        ),
     )
     return parser
 
