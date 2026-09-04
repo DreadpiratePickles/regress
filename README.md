@@ -1,8 +1,8 @@
-# model-regression-detection
+# regress
 
 **Catch LLM prompt regressions in CI — before they reach users.**
 
-[![regression](https://github.com/DreadpiratePickles/model-regression-detection/actions/workflows/regression.yml/badge.svg)](https://github.com/DreadpiratePickles/model-regression-detection/actions/workflows/regression.yml)
+[![regression](https://github.com/DreadpiratePickles/regress/actions/workflows/regression.yml/badge.svg)](https://github.com/DreadpiratePickles/regress/actions/workflows/regression.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)](.python-version)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![tests: 584](https://img.shields.io/badge/tests-584-brightgreen)](tests/)
@@ -10,7 +10,8 @@
 This is a CI check for features built on language models. It runs a set of hand-written test cases through your
 feature, has a model grade each output against plain-English criteria, and compares the result to a baseline committed
 in your repository. It then answers one question — **did this change make the feature worse?** — with a verdict that
-accounts for the fact that the same prompt scores differently every time you run it.
+accounts for the fact that the same prompt scores differently every time you run it. The repository is
+`regress`; the Python package it installs is `regression_detect`.
 
 ## Contents
 
@@ -214,8 +215,8 @@ never decided on, and six honest limitations worth reading before you trust a ve
 ### 2. Clone and install
 
 ```bash
-git clone https://github.com/DreadpiratePickles/model-regression-detection
-cd model-regression-detection
+git clone https://github.com/DreadpiratePickles/regress
+cd regress
 uv sync
 ```
 
@@ -499,7 +500,7 @@ fail this workflow — a check that goes red for reasons the author cannot fix g
 
 **Half of this workflow has run on GitHub, and half has not.** The `unit` job ran green on the first push to `main` —
 lint, the full test suite and the offline dry run, 18 seconds:
-[run 33625981057](https://github.com/DreadpiratePickles/model-regression-detection/actions/runs/33625981057). The
+[run 33625981057](https://github.com/DreadpiratePickles/regress/actions/runs/33625981057). The
 `scope`
 and `regression` jobs were skipped there because they only run on pull requests, so the live check is still
 **unexercised**: it needs a pull request touching the measured surface and a `GEMINI_API_KEY` secret, neither of which
@@ -739,7 +740,7 @@ output from a real run.
 |---|---|
 | Stages 01–04, three target adapters, baseline tooling, calibration tooling | Implemented and unit-tested |
 | End-to-end detection against a live model | Verified: a real regression caught, and a control run correctly cleared |
-| CI `unit` job (lint, tests, offline dry run) | Verified on GitHub: green on the first push to `main`, [run 33625981057](https://github.com/DreadpiratePickles/model-regression-detection/actions/runs/33625981057) |
+| CI `unit` job (lint, tests, offline dry run) | Verified on GitHub: green on the first push to `main`, [run 33625981057](https://github.com/DreadpiratePickles/regress/actions/runs/33625981057) |
 | CI `scope` + `regression` jobs (the live check) | Written and reviewed; **not yet exercised** — needs a pull request touching the measured surface and a `GEMINI_API_KEY` secret |
 | Slack alert | Payload built and tested; **no real webhook send has been performed** |
 | Judge calibration | Tooling implemented; **no human labels collected, so no agreement rate is published** |
